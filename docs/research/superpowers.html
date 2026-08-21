@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>superpowers · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/architecture.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>superpowers</h1>
+    <div class="sub">Jesse Vincent — the model will talk itself out of the process</div>
+  </div>
+  <p>A process-enforcement skills library for coding agents — brainstorm-gate → plan → TDD → subagent-reviewed implementation → merge, injected into every session via a SessionStart hook.</p>
+<ul>
+<li>Repo: https://github.com/obra/superpowers</li>
+<li>Commit: <code>b36e082</code></li>
+<li>Author: Jesse Vincent / Prime Radiant</li>
+<li>Analyzed: 2026-08-21</li>
+</ul>
+<h2 id="tldr">TL;DR</h2>
+<ul>
+<li>14 skills, zero third-party dependencies, distributed as a multi-harness plugin (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Pi, Hermes, Devin, Grok, Copilot CLI, Antigravity...).</li>
+<li>A <code>SessionStart</code> hook (<code>hooks/session-start</code>) injects the full text of <code>skills/using-superpowers/SKILL.md</code> into every session's context, under an <code>&lt;EXTREMELY_IMPORTANT&gt;</code> tag, telling the agent it "must" invoke any skill with even a 1% chance of relevance before doing anything else — this is the entire trigger mechanism; there is no separate search index.</li>
+<li>The house method: <code>brainstorming</code> (idea→approved design, three ceremony tiers) → <code>writing-plans</code> (bite-sized tasks, 2-5 min each) → <code>subagent-driven-development</code> (fresh subagent per task, two-stage review, ledgered rulings) or <code>executing-plans</code> (inline) → <code>finishing-a-development-branch</code> (merge/PR/keep menu).</li>
+<li>Enforcement is textual, not mechanical: <code>test-driven-development</code>, <code>systematic-debugging</code>, and <code>verification-before-completion</code> each state an "Iron Law" in a fenced block, then pre-empt every rationalization the maintainers observed agents actually use, in an "Excuse | Reality" table.</li>
+<li><code>CLAUDE.md</code> documents a 94% PR rejection rate and treats skill text itself as tested artifact — "Skills are not prose — they are code that shapes agent behavior."</li>
+</ul>
+<h2 id="inventory">Inventory</h2>
+<h3 id="skills-14-total-find-rootrepossuperpowers-name-skillmd-not-path-git-14-files-grouped-per-readmes-own-taxonomy">Skills — 14 total (<code>find /root/repos/superpowers -name 'SKILL.md' -not -path '*/.git/*'</code> → 14 files), grouped per README's own taxonomy</h3>
+<p><strong>Testing</strong></p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Path</th>
+<th>What it does</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>test-driven-development</td>
+<td><code>skills/test-driven-development/SKILL.md</code></td>
+<td>RED→GREEN→REFACTOR; deletes code written before its test</td>
+<td>before writing implementation code</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Debugging</strong></p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Path</th>
+<th>What it does</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>systematic-debugging</td>
+<td><code>skills/systematic-debugging/SKILL.md</code></td>
+<td>4-phase root-cause process; ships root-cause-tracing.md, defense-in-depth.md, condition-based-waiting.md, find-polluter.sh</td>
+<td>any bug/test failure, before proposing fixes</td>
+</tr>
+<tr>
+<td>verification-before-completion</td>
+<td><code>skills/verification-before-completion/SKILL.md</code></td>
+<td>Blocks success claims until a verification command has run in that message</td>
+<td>before any completion claim</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Collaboration</strong></p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Path</th>
+<th>What it does</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>brainstorming</td>
+<td><code>skills/brainstorming/SKILL.md</code></td>
+<td>Classifies spike/bounded/architectural; Socratic requirements; hard approval gate</td>
+<td>before any creative/feature work</td>
+</tr>
+<tr>
+<td>writing-plans</td>
+<td><code>skills/writing-plans/SKILL.md</code></td>
+<td>Fully-specified plan doc, per-task files, exact code, no placeholders</td>
+<td>multi-step task, before touching code</td>
+</tr>
+<tr>
+<td>executing-plans</td>
+<td><code>skills/executing-plans/SKILL.md</code></td>
+<td>Inline batch plan execution with human checkpoints</td>
+<td>plan execution, subagents unavailable</td>
+</tr>
+<tr>
+<td>subagent-driven-development</td>
+<td><code>skills/subagent-driven-development/SKILL.md</code></td>
+<td>Fresh subagent/task + two-stage review + final review; ledger; 5-round fix loop</td>
+<td>executing plans with independent tasks</td>
+</tr>
+<tr>
+<td>dispatching-parallel-agents</td>
+<td><code>skills/dispatching-parallel-agents/SKILL.md</code></td>
+<td>Parallel subagent dispatch on independent problem domains</td>
+<td>2+ independent, no shared-state tasks</td>
+</tr>
+<tr>
+<td>requesting-code-review</td>
+<td><code>skills/requesting-code-review/SKILL.md</code></td>
+<td>Dispatches reviewer subagent via <code>code-reviewer.md</code>; Critical/Important/Minor</td>
+<td>completing tasks, before merge</td>
+</tr>
+<tr>
+<td>receiving-code-review</td>
+<td><code>skills/receiving-code-review/SKILL.md</code></td>
+<td>Bans performative agreement; read→verify→evaluate→respond</td>
+<td>receiving review feedback</td>
+</tr>
+<tr>
+<td>using-git-worktrees</td>
+<td><code>skills/using-git-worktrees/SKILL.md</code></td>
+<td>Detect→native-tool→git-fallback isolation, baseline test run</td>
+<td>starting feature work needing isolation</td>
+</tr>
+<tr>
+<td>finishing-a-development-branch</td>
+<td><code>skills/finishing-a-development-branch/SKILL.md</code></td>
+<td>Verify tests → merge/PR/keep menu (discard needs typed confirm) → cleanup</td>
+<td>implementation complete, tests pass</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Meta</strong></p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Path</th>
+<th>What it does</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>using-superpowers</td>
+<td><code>skills/using-superpowers/SKILL.md</code></td>
+<td>Bootstrap: mandates checking for a skill before ANY action</td>
+<td>injected verbatim at every SessionStart</td>
+</tr>
+<tr>
+<td>writing-skills</td>
+<td><code>skills/writing-skills/SKILL.md</code></td>
+<td>TDD-for-docs: pressure-test before writing; "Match the Form to the Failure"</td>
+<td>creating/editing/testing skills</td>
+</tr>
+</tbody>
+</table></div>
+<p>Total: 1 (testing) + 2 (debugging) + 9 (collaboration) + 2 (meta) = 14, matching the <code>find</code> count exactly.</p>
+<h3 id="hooks">Hooks</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Event</th>
+<th>File</th>
+<th>What it enforces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SessionStart</code> (matcher <code>startup\|clear\|compact</code>)</td>
+<td><code>hooks/hooks.json</code> → <code>hooks/run-hook.cmd</code> → <code>hooks/session-start</code></td>
+<td>Reads <code>skills/using-superpowers/SKILL.md</code>, JSON-escapes it, and emits it as injected context — in one of three shapes depending on the detected harness: Claude Code (<code>hookSpecificOutput.additionalContext</code>), Cursor (<code>additional_context</code>), or SDK-standard/Copilot CLI (top-level <code>additionalContext</code>). This is the <em>entire</em> mechanism that makes skills "auto-trigger" — there is no runtime skill-search index; the model reads the bootstrap text and is instructed to call the <code>Skill</code> tool itself.</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>tests/hooks/test-session-start.sh</code> (only file under <code>tests/hooks/</code>) asserts: hook declares <code>shell: "bash"</code> (Windows dispatch fix, see below), and the three per-harness JSON output shapes are each well-formed and non-empty. There is exactly one hook and one hook test file in the repo.</p>
+<h3 id="agents-subagents">Agents / subagents</h3>
+<p>No persistent named subagent personas exist in the repo. "Subagents" are ad-hoc dispatches of Claude Code's generic <code>general-purpose</code> type, driven entirely by prompt templates:
+- <code>skills/subagent-driven-development/implementer-prompt.md</code> (154 lines) — task-implementer dispatch template.
+- <code>skills/subagent-driven-development/task-reviewer-prompt.md</code> (207 lines) — per-task two-verdict (spec + quality) reviewer template.
+- <code>skills/subagent-driven-development/re-review-prompt.md</code> — scoped fix-verification template.
+- <code>skills/requesting-code-review/code-reviewer.md</code> — general review template (Strengths/Critical/Important/Minor/Assessment), reused as final whole-branch reviewer.
+- <code>skills/brainstorming/spec-document-reviewer-prompt.md</code>, <code>skills/writing-plans/plan-document-reviewer-prompt.md</code> — self-review checklists, not subagent dispatches.</p>
+<p>Supporting scripts in <code>skills/subagent-driven-development/scripts/</code>: <code>sdd-workspace</code> (resolves per-plan workspace <code>.superpowers/sdd/&lt;plan-basename&gt;/</code>), <code>task-brief</code> (extracts one task's text to a file), <code>review-package</code> (writes a diff package file for a reviewer to Read).</p>
+<h2 id="the-core-engineering-flow">The core engineering flow</h2>
+<ol>
+<li><strong>using-superpowers</strong> (bootstrap, forced) — every session opens with the skill text injected; any 1%-relevant skill is mandatory.</li>
+<li><strong>brainstorming</strong> — classify spike / bounded / architectural. Architectural: explore→clarify→2-3 approaches→sectioned design→spec to <code>docs/superpowers/specs/YYYY-MM-DD-&lt;topic&gt;-design.md</code>→self-review→<strong>hard approval gate</strong>. Bounded: short in-chat design, still gated, no spec file. Spike: 2-3 sentence probe, throwaway output.</li>
+<li><strong>writing-plans</strong> (architectural only) — approved spec becomes <code>docs/superpowers/plans/YYYY-MM-DD-&lt;feature-name&gt;.md</code>: bite-sized (2-5 min) tasks, exact file paths, complete code, an "Interfaces: Consumes/Produces" block, header pointing back at the spec.</li>
+<li><strong>using-git-worktrees</strong> — isolates work (native tool, else <code>.worktrees/&lt;branch&gt;</code> via <code>git worktree add</code>), runs setup, verifies a clean test baseline first.</li>
+<li><strong>subagent-driven-development</strong> (preferred) or <strong>executing-plans</strong> (fallback) — per task: dispatch fresh implementer subagent against a <code>task-brief</code>; dispatch task reviewer against a <code>review-package</code> diff; failures enter a 5-round fix loop (rounds 1-3 resume the implementer, 4-5 escalate to a fresh implementer on a stronger model); all recorded in ledger <code>.superpowers/sdd/&lt;plan-basename&gt;/progress.md</code>, which survives context compaction.</li>
+<li><strong>test-driven-development</strong> — inside every implementer dispatch: failing test → verify it fails correctly → minimal code → verify green → refactor → commit. Code written before its test is deleted, not adapted.</li>
+<li><strong>requesting-code-review / receiving-code-review</strong> — per-task reviewer verdicts spec-compliance and quality separately; final whole-branch reviewer on the most capable model before merge; feedback answered with verification, not gratitude.</li>
+<li><strong>verification-before-completion</strong> — gates every "done"/"passes" claim on freshly-run command output in that same message; applies to the controller and to subagent self-reports.</li>
+<li><strong>finishing-a-development-branch</strong> — full test run → 3 (or 2, detached HEAD) options: merge locally / push+PR / keep-as-is; discard requires typed word <code>discard</code>; cleanup only for worktrees Superpowers created.</li>
+</ol>
+<p>Artifacts produced/consumed, by real path:
+- Spec: <code>docs/superpowers/specs/YYYY-MM-DD-&lt;topic&gt;-design.md</code>
+- Plan: <code>docs/superpowers/plans/YYYY-MM-DD-&lt;feature-name&gt;.md</code>
+- SDD workspace (git-ignored, per-plan): <code>.superpowers/sdd/&lt;plan-basename&gt;/</code> containing <code>progress.md</code> (ledger), <code>task-N-brief.md</code>, <code>task-N-report.md</code>, and review-package diff files
+- Worktree: <code>.worktrees/&lt;branch-name&gt;/</code> (or <code>worktrees/</code>, whichever pre-exists; <code>.worktrees</code> wins if both exist)</p>
+<pre class="mermaid">flowchart TD
+    A["SessionStart hook injects\nusing-superpowers bootstrap"] --> B{"brainstorming:\nclassify request"}
+    B -->|spike| C["probe, report\nrecommendation\n(no artifact)"]
+    B -->|bounded| D["short in-chat design\n+ approval gate"]
+    B -->|architectural| E["spec doc\ndocs/superpowers/specs/*.md"]
+    D --> F["normal dev workflow\n(TDD, no plan doc)"]
+    E --> G["writing-plans:\nplan doc\ndocs/superpowers/plans/*.md"]
+    G --> H["using-git-worktrees:\nisolated workspace\n.worktrees/<branch>/"]
+    H --> I{"subagent-driven-development\nor executing-plans"}
+    I --> J["per task: implementer subagent\n(TDD red/green/refactor, commits)"]
+    J --> K["task reviewer subagent\nspec + quality verdicts"]
+    K -->|findings| L["fix loop: resume implementer\n(rounds 1-3), escalate model\n(rounds 4-5), 5-round breaker"]
+    L --> K
+    K -->|clean| M{"more tasks?"}
+    M -->|yes| J
+    M -->|no| N["final whole-branch reviewer\n(most capable model)"]
+    N --> O["finishing-a-development-branch:\nmerge / PR / keep menu"]
+    F --> O
+    C --> Z(("done"))
+    O --> Z
+</pre>
+<h2 id="core-beliefs-principles">Core beliefs / principles</h2>
+<ul>
+<li><strong>Evidence before claims, always.</strong> <code>skills/verification-before-completion/SKILL.md</code>: <code>"NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE"</code> — a claim requires a command run <em>in that message</em>.</li>
+<li><strong>Root cause over symptom.</strong> <code>skills/systematic-debugging/SKILL.md</code>: <code>"NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST"</code>; three failed fixes force an architecture discussion, not a fourth patch.</li>
+<li><strong>Tests first, no exceptions.</strong> <code>skills/test-driven-development/SKILL.md</code>: <code>"NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST"</code> — "Write code before the test? Delete it. Start over... Delete means delete."</li>
+<li><strong>Letter equals spirit.</strong> TDD and debugging skills both state: <code>"Violating the letter of the rules is violating the spirit of the rules."</code> — pre-empts "spirit not ritual" rationalization.</li>
+<li><strong>Approval is a hard gate regardless of task size.</strong> <code>skills/brainstorming/SKILL.md</code>: <code>"the ceremony scales with the task; the approval gate never does."</code></li>
+<li><strong>Skills are mandatory, not advisory.</strong> <code>skills/using-superpowers/SKILL.md</code>: <code>"IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT... This is not negotiable."</code></li>
+<li><strong>Rulings over stalls in autonomous execution.</strong> <code>skills/subagent-driven-development/SKILL.md</code>: <code>"A wrong ruling costs rework your human partner can see and undo; a session parked on a question costs their whole day and buys nothing."</code></li>
+<li><strong>No performative deference to review feedback.</strong> <code>skills/receiving-code-review/SKILL.md</code>: <code>"NEVER: 'You're absolutely right!'... If you catch yourself about to write 'Thanks': DELETE IT."</code></li>
+<li><strong>Skills are tested code, not prose.</strong> <code>CLAUDE.md</code>: <code>"Skills are not prose — they are code that shapes agent behavior... Do not modify carefully-tuned content... without evidence the change is an improvement."</code></li>
+<li><strong>PR quality bar is adversarially high.</strong> <code>CLAUDE.md</code>: <code>"This repo has a 94% PR rejection rate... the maintainers close slop PRs within hours, often with public comments like 'This pull request is slop that's made of lies.'"</code></li>
+</ul>
+<h2 id="mechanics-worth-stealing">Mechanics worth stealing</h2>
+<ul>
+<li><strong>Hook-based mandatory context injection.</strong> <code>hooks/session-start</code> reads one file (<code>using-superpowers/SKILL.md</code>) and re-emits it, JSON-escaped, wrapped in <code>&lt;EXTREMELY_IMPORTANT&gt;</code> tags, as <code>SessionStart</code> hook output — forces specific text into every fresh or post-compaction context without relying on the model "remembering." Branches output shape by detected harness (<code>CURSOR_PLUGIN_ROOT</code> / <code>CLAUDE_PLUGIN_ROOT</code>+<code>COPILOT_CLI</code> / fallback) so one script serves many platforms.</li>
+<li><strong>Rationalization tables as the actual enforcement surface.</strong> Every discipline skill ships an "Excuse | Reality" or "Red Flags" table built from <em>observed</em> agent rationalizations during pressure testing, e.g. TDD's: <code>"'Tests after achieve same goals (spirit not ritual)' → 'Tests-first answer "what should this do?"... Test-first forces that failure.'"</code> <code>writing-skills/SKILL.md</code> documents building this table from adversarial subagent test runs — it's the mechanism, not decoration.</li>
+<li><strong>"Match the Form to the Failure"</strong> (<code>writing-skills/SKILL.md</code>): prohibition-based guidance ("don't do X") measurably backfires for shape-of-output problems and should be reserved for pressure-driven rule violations; positive recipes work better for shape problems. Cited evidence: "the prohibition arm produced clearly more of the unwanted content than the recipe arm."</li>
+<li><strong>Dispatch via files, not pasted history.</strong> <code>subagent-driven-development/SKILL.md</code>: <code>"Everything you paste into a dispatch prompt... stays resident in your context... Hand artifacts over as files."</code> <code>scripts/task-brief PLAN_FILE N</code> writes a task's text to a file; the dispatch references the path, never inlines the plan.</li>
+<li><strong>Explicit no-recursive-subagents contract.</strong> Implementer and reviewer templates forbid spawning their own subagents — observed failure: <code>"every reviewer a worker spawned duplicated the task review the controller dispatched anyway."</code></li>
+<li><strong>Ledger survives compaction, not memory.</strong> <code>"Controllers that lost their place have re-dispatched entire completed task sequences — the single most expensive failure observed."</code> Fix: <code>.superpowers/sdd/&lt;plan-basename&gt;/progress.md</code>, first line names the owning plan, resumed via <code>git log</code> + ledger rather than recollection.</li>
+<li><strong>Typed-word confirmation for destructive actions.</strong> <code>finishing-a-development-branch/SKILL.md</code> requires the literal string <code>discard</code> before deleting a branch/worktree — <code>"'Yeah, get rid of it' counts as confirmation" → "Only the typed word 'discard' authorizes deletion."</code></li>
+</ul>
+<h2 id="weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</h2>
+<ul>
+<li><strong>Ceremony is real even on "light" paths.</strong> Even a "bounded" one-file fix requires stop-and-wait human approval of a stated design before any edit — the gate is never skippable, only shortened.</li>
+<li><strong>The whole system rests on one hook firing correctly.</strong> If <code>SessionStart</code> doesn't fire (hook timeout, or the Windows PowerShell/cmd parser failure the repo's own history shows happened — issues #1751/#1918, fixed by adding <code>shell: "bash"</code>), skills are, in the README's words, "dead weight — present on disk but never invoked." There is no independent skill-search fallback; injection is the only trigger.</li>
+<li><strong>Enforcement is textual/persuasive, not mechanical.</strong> Rules like "no code before test" are enforced by instructing the model harder (rationalization tables, ALL-CAPS, "not negotiable") — no static check or runtime gate can actually stop a model from writing code first. <code>writing-skills</code> itself documents this as an ongoing "close the loophole" arms race.</li>
+<li><strong>SDD's 5-round fix loop + per-task two-stage review + final whole-branch review is a lot of subagent dispatches per unit of shipped code</strong> — tiered model selection mitigates cost but wall-clock latency still multiplies for anything beyond a couple of tasks.</li>
+<li><strong>Hard approval gates assume a present, attentive human.</strong> SDD's "Rulings, not stalls" model compensates partially but still stops unconditionally for four categories (destructive ops, security-sensitive actions, side effects outside the worktree, unresolvable plan defects).</li>
+<li><strong>No skill addresses non-code creative/analytical work</strong> — exclusively a software engineering process; anything outside "spec → plan → code → review → merge" has no home here.</li>
+<li><strong>Contributor governance is heavy by design</strong> (94% PR rejection, mandatory model/harness disclosure, no bundled changes, no "compliance" rewordings without eval evidence) — fine for a curated library, hostile to casual contribution.</li>
+</ul>
+<h2 id="fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</h2>
+<p><strong>Carries over well:</strong> <code>verification-before-completion</code>'s gate function (never claim "tests pass" without a fresh run in that message) is cheap and catches a real failure mode on its own. <code>systematic-debugging</code>'s "3+ failed fixes → question the architecture" rule is a useful circuit breaker against exactly the thrashing a deadline invites. The <strong>spike</strong> path in <code>brainstorming</code> (2-3 sentence probe, nod, investigate, throwaway) is essentially free and matches how a solo senior engineer already works. <code>writing-plans</code>'s "no placeholders" discipline (concrete code in every step, no "similar to Task N") is good practice regardless of speed.</p>
+<p><strong>Pure overhead at this scale:</strong> the full <code>subagent-driven-development</code> machinery (ledgers, two-stage per-task review, 5-round fix loop, final capable-model review) is built for long unattended multi-hour runs across many tasks — a solo engineer who already holds full context self-reviews faster than round-tripping through review templates. The architectural-path ritual (spec doc → self-review → user-reviews-spec → separate plan doc) is proportionate for a new subsystem, not "add this endpoint"; a one-day deadline will want to collapse bounded and architectural further than the skill allows. <code>using-git-worktrees</code>'s isolation ceremony matters for parallel/subagent work, not solo linear work. The <code>finishing-a-development-branch</code> menu and typed-confirmation ritual guard against agent-driven destructive actions; a human running <code>git merge</code> themselves needs the underlying caution, not the ceremony.</p>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#tldr">TL;DR</a><a href="#inventory">Inventory</a><a href="#the-core-engineering-flow">The core engineering flow</a><a href="#core-beliefs-principles">Core beliefs / principles</a><a href="#mechanics-worth-stealing">Mechanics worth stealing</a><a href="#weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</a><a href="#fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

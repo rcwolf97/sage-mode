@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UI/UX Pro Max · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/architecture.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>UI/UX Pro Max</h1>
+    <div class="sub">nextlevelbuilder — the model has no taste and no eyes</div>
+  </div>
+  <p>A CSV-backed, BM25-searchable design knowledge base packaged as a Claude Code (and 18-other-agent) skill, paired with a bundled "claudekit" family of adjacent design skills and a separate Playwright-driven design-review workflow.</p>
+<ul>
+<li>Repo: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill</li>
+<li>Commit analyzed: <code>bc826e2</code> (shallow clone, single commit visible)</li>
+<li>Date analyzed: 2026-08-21</li>
+</ul>
+<h2 id="tldr">TL;DR</h2>
+<ul>
+<li>Core deliverable is <code>src/ui-ux-pro-max/data/*.csv</code> — 22 files, ~3,060 lines (plus <code>google-fonts.csv</code> at 1,935 lines and a 1,512-entry Phosphor icon manifest) — queried by a from-scratch, stdlib-only BM25 engine (<code>core.py</code>, 993 lines), never dumped into the prompt.</li>
+<li>The engine runs as a subprocess (<code>python search.py "&lt;query&gt;" --domain &lt;domain&gt;</code>), returning ~3-10 rows per call — real progressive disclosure via a search tool, not a giant markdown file.</li>
+<li><code>--design-system</code> composes 5 parallel domain searches (product/style/color/landing/typography) plus a closed, regex-driven "decision rules" JSON grammar (<code>reasoning_contract.py</code>) explicitly documented as "non-executable" — no eval, no LLM-authored code path.</li>
+<li>One plugin bundles two products: the nextlevelbuilder-authored <code>ui-ux-pro-max</code> data/search skill, and six MIT <code>claudekit</code>-authored skills (<code>design</code>, <code>design-system</code>, <code>ui-styling</code>, <code>brand</code>, <code>slides</code>, <code>banner-design</code>) shipping in the same <code>.claude/skills/</code> tree and installing together.</li>
+<li>Marketing counts drift: <code>skill.json</code> says "84 styles ... 98 UX guidelines"; the machine-generated <code>catalog-summary.json</code> (verified 2026-08-13) says 88 total styles (79 searchable) and 119 UX guidelines — five+ files must be hand-synced and at least one has gone stale.</li>
+</ul>
+<h2 id="inventory">Inventory</h2>
+<h3 id="skills-claudeskillsskillmd-mirrored-into-cliassetsskills">Skills (<code>.claude/skills/*/SKILL.md</code>, mirrored into <code>cli/assets/skills/</code>)</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Path</th>
+<th>What it does</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ui-ux-pro-max</code></td>
+<td><code>.claude/skills/ui-ux-pro-max/</code></td>
+<td>Searches the CSV knowledge base, generates a "design system" via <code>search.py</code></td>
+<td>Any UI/UX task; author nextlevelbuilder</td>
+</tr>
+<tr>
+<td><code>design</code></td>
+<td><code>.claude/skills/design/</code></td>
+<td>Umbrella: brand identity, logo gen (55 styles), CIP (50 deliverables), slides, banners (22 styles), icons, social photos</td>
+<td>"design logo", "create CIP", "build slides"; author claudekit</td>
+</tr>
+<tr>
+<td><code>design-system</code></td>
+<td><code>.claude/skills/design-system/</code> (244 ln)</td>
+<td>Three-layer token architecture + a slide-generation subsystem with its own 8 CSVs and BM25 search</td>
+<td>Token creation, Tailwind theming, presentations; author claudekit</td>
+</tr>
+<tr>
+<td><code>ui-styling</code></td>
+<td><code>.claude/skills/ui-styling/</code> (324 ln)</td>
+<td>shadcn/ui + Tailwind + Radix implementation guidance and reference docs</td>
+<td>Building React UI, accessible components, dark mode; author claudekit</td>
+</tr>
+<tr>
+<td><code>brand</code></td>
+<td><code>.claude/skills/brand/</code></td>
+<td>Brand voice, visual identity, messaging frameworks</td>
+<td>Branded content, style guides; author claudekit</td>
+</tr>
+<tr>
+<td><code>slides</code></td>
+<td><code>.claude/skills/slides/</code> (40 ln, pointer into design-system's slide subsystem)</td>
+<td>Strategic HTML presentations with Chart.js + copy formulas</td>
+<td>Presentation/deck requests; author claudekit</td>
+</tr>
+<tr>
+<td><code>banner-design</code></td>
+<td><code>.claude/skills/banner-design/</code> (196 ln)</td>
+<td>Banner art direction across platforms/styles</td>
+<td>Social/ad/hero/print banners; author claudekit</td>
+</tr>
+</tbody>
+</table></div>
+<p>All seven install together under one <code>.claude-plugin/plugin.json</code> entry (<code>"skills": "./.claude/skills/"</code>) — not just the flagship one.</p>
+<h3 id="agents-commands-stackclaude-a-separate-starter-kit-subtree-not-the-plugin-proper">Agents / Commands (<code>stack/.claude/</code>, a separate starter-kit subtree, not the plugin proper)</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Role</th>
+<th>Model</th>
+<th>Tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>design-review</code> (agent)</td>
+<td>Drives a real browser through a 7-phase audit (setup, interaction, responsive, visual polish, WCAG 2.1 AA, edge cases, console) and returns ranked Blocker/High/Medium/Nitpick findings</td>
+<td><code>sonnet</code></td>
+<td><code>mcp__playwright, mcp__chrome-devtools, Read, Grep, Glob, Bash</code></td>
+</tr>
+<tr>
+<td><code>/design-review</code> (command)</td>
+<td>Invokes the subagent against a URL/file, optional focus argument</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>/design-plan</code> (command)</td>
+<td>Runs the ui-ux-pro-max design-system generator, then applies <code>frontend-design</code>'s taste lens before any code is written</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>stack/</code> is a distinct "Claude Website Design Stack" starter repo bundled inside this one (own README/CLAUDE.md/<code>.mcp.json</code>/CI), not part of the installable plugin — it demonstrates wiring the data skill to Playwright/Chrome DevTools/shadcn MCP and a review subagent.</p>
+<h3 id="knowledge-bases-srcui-ux-pro-maxdata-source-of-truth-mirrored-to-claudeskillsui-ux-pro-maxdata-and-cliassetsdata">Knowledge bases (<code>src/ui-ux-pro-max/data/</code>, source of truth; mirrored to <code>.claude/skills/ui-ux-pro-max/data/</code> and <code>cli/assets/data/</code>)</h3>
+<p>Counts below are from the machine-generated <code>data/catalog-summary.json</code> (<code>verifiedAt: 2026-08-13</code>), cross-checked with <code>wc -l</code>:</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Format</th>
+<th>Contents</th>
+<th>Size/count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>styles.csv</code></td>
+<td>CSV, 28 cols incl. <code>Style ID</code>, <code>Aliases</code>, <code>Status</code>, <code>AI Prompt Keywords</code>, <code>Implementation Checklist</code>, <code>Design System Variables</code></td>
+<td>UI style taxonomy (glassmorphism, brutalism, neumorphism, Fluent 2, Spectrum...) with colors, effects, a11y risk, checklist, CSS vars</td>
+<td>88 rows; 79 searchable (50 active / 29 supplemental / 9 deprecated)</td>
+</tr>
+<tr>
+<td><code>products.csv</code></td>
+<td>CSV</td>
+<td>Product type → style/landing pattern/dashboard style/color focus/considerations</td>
+<td>192 rows</td>
+</tr>
+<tr>
+<td><code>colors.csv</code></td>
+<td>CSV, 19 cols</td>
+<td>Semantic palette (Primary/On Primary/.../Ring) per product type, 1:1 with <code>products.csv</code></td>
+<td>192 rows</td>
+</tr>
+<tr>
+<td><code>ui-reasoning.csv</code></td>
+<td>CSV incl. <code>Decision_Rules</code> JSON col</td>
+<td>Per-product pattern/style-priority/color-mood/effects + machine-parsed conditional rules</td>
+<td>192 rows</td>
+</tr>
+<tr>
+<td><code>typography.csv</code></td>
+<td>CSV</td>
+<td>Font pairings: heading+body, mood keywords, Google Fonts URL, CSS import, Tailwind config</td>
+<td>74 rows</td>
+</tr>
+<tr>
+<td><code>google-fonts.csv</code></td>
+<td>CSV</td>
+<td>Individual Google Fonts: family, category, stroke, classifications, variable axes, popularity rank</td>
+<td>1,935 lines (≈1,934 approved fonts)</td>
+</tr>
+<tr>
+<td><code>google-font-licenses.json</code></td>
+<td>JSON</td>
+<td>License metadata gating promotion into the CSV</td>
+<td>20,185 lines</td>
+</tr>
+<tr>
+<td><code>icons.csv</code></td>
+<td>CSV</td>
+<td>Curated icons: name, keywords, library, import code, semantic role, allowed contexts</td>
+<td>106 lines (105 icons, mostly Phosphor)</td>
+</tr>
+<tr>
+<td><code>phosphor-icons-upstream.json</code></td>
+<td>JSON</td>
+<td>Full upstream Phosphor manifest — validation source, not search-served</td>
+<td>32,582 lines (1,512 icons)</td>
+</tr>
+<tr>
+<td><code>ux-guidelines.csv</code></td>
+<td>CSV, 10 cols incl. Do/Don't/Code/Severity</td>
+<td>Cross-platform UX/a11y rules (nav, forms, focus, WCAG 2.2)</td>
+<td>120 lines (119 guidelines)</td>
+</tr>
+<tr>
+<td><code>app-interface.csv</code></td>
+<td>CSV</td>
+<td>Native/app interface guidelines (iOS/Android/RN)</td>
+<td>33 lines</td>
+</tr>
+<tr>
+<td><code>react-performance.csv</code></td>
+<td>CSV</td>
+<td>React/Next.js perf anti-patterns</td>
+<td>45 lines</td>
+</tr>
+<tr>
+<td><code>charts.csv</code></td>
+<td>CSV</td>
+<td>Chart-type matrix: when (not) to use, data-volume thresholds, a11y grade/fallback, library recs</td>
+<td>26 lines (25 types)</td>
+</tr>
+<tr>
+<td><code>landing.csv</code></td>
+<td>CSV</td>
+<td>Landing-page structural patterns (34-pattern dataset per README)</td>
+<td>35 lines</td>
+</tr>
+<tr>
+<td><code>motion.csv</code></td>
+<td>CSV</td>
+<td>GSAP presets by intensity tier, Do/Don't, perf notes</td>
+<td>18 lines (17 presets)</td>
+</tr>
+<tr>
+<td><code>data/stacks/*.csv</code></td>
+<td>22 CSVs, common schema (<code>Category, Guideline, Description, Do, Don't, Code Good/Bad, Severity, Docs URL, Applies To, Status, Verified At</code>)</td>
+<td>Framework-specific implementation guidance, version-aware</td>
+<td>1,283 lines total (≈1,260 rows)</td>
+</tr>
+<tr>
+<td><code>data-provenance.json</code></td>
+<td>JSON</td>
+<td>Per-fact provenance/audit trail</td>
+<td>1,348 lines</td>
+</tr>
+<tr>
+<td><code>catalog-summary.json</code></td>
+<td>JSON</td>
+<td>Authoritative machine-generated counts + sha256 snapshots + pending candidates</td>
+<td>78 lines</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>design-system</code> skill's own data (separate catalog, used only for slide generation): 8 small CSVs (11–26 lines each, 150 lines total) — <code>slide-strategies.csv</code> (15 deck structures), <code>slide-layouts.csv</code> (25 layouts), <code>slide-copy.csv</code> (25 copywriting formulas: PAS/AIDA/FAB), etc.</p>
+<p><strong>Runtime loading model:</strong> nothing above is loaded wholesale into context. <code>SKILL.md</code> states the pattern directly: <em>"use <code>--domain &lt;Domain&gt;</code> to query full details. The full rule text for every category lives in <code>references/quick-reference.md</code> — read it on demand rather than loading it every time."</em> <code>search.py</code> runs as a subprocess (argv, not a context-loaded document) and returns a small ranked slice (<code>MAX_RESULTS = 3</code> by default, tunable with <code>-n</code>). <code>references/quick-reference.md</code> (256 lines) is a static index of all 119 UX guideline IDs for scanning without a search round-trip; <code>references/pro-rules.md</code> (117 lines) loads only "before final delivery of native/mobile app UI."</p>
+<h2 id="the-core-engineering-flow">The core engineering flow</h2>
+<ol>
+<li><strong>Analyze requirements</strong> — extract product type, audience, style keywords, and stack; stack is <em>detected</em> from <code>package.json</code>/<code>pubspec.yaml</code>/<code>*.xcodeproj</code>/<code>composer.json</code>, never defaulted (<em>"Never assume a stack — a hardcoded default silently misroutes every recommendation"</em>, SKILL.md:71). Produces: query parameters.</li>
+<li><strong>Generate design system</strong> (<code>--design-system</code>) — 5 parallel domain searches (product/style/color/landing/typography) aggregated, then <code>ui-reasoning.csv</code>'s <code>Decision_Rules</code> JSON is matched against the query by <code>reasoning_contract.py</code>. Produces: a design-system object (pattern, colors, typography, effects, anti-patterns, checklist), optionally persisted to <code>design-system/&lt;slug&gt;/MASTER.md</code> + per-page overrides.</li>
+<li><strong>Commit to a look</strong> (external <code>frontend-design</code> skill, via <code>/design-plan</code>) — forces an explicit purpose/tone/constraint/differentiation statement and one signature element, rejecting "AI slop" defaults. Consumes step 2's tokens; produces a stated rationale.</li>
+<li><strong>Supplement with targeted searches</strong> (<code>--domain ux|color|typography|chart|icons|gsap|...</code>, plus <code>--stack &lt;name&gt;</code>) for specific components/bugs. Produces implementation snippets/checklists.</li>
+<li><strong>Build</strong> — implement with the resolved tokens/components (optionally shadcn MCP for React).</li>
+<li><strong>See it</strong> — open the running page in a real browser (Playwright/Chrome DevTools MCP), screenshot each viewport tier. Lives outside the <code>ui-ux-pro-max</code> skill, in the <code>stack/</code> starter kit's CLAUDE.md workflow.</li>
+<li><strong>Review</strong> (<code>design-review</code> subagent / <code>/design-review</code>) — 7-phase audit (setup → interaction → responsiveness → visual polish → WCAG 2.1 AA → edge cases → console) across 375/768/1024/1440/1920px, output as ranked Blocker/High/Medium/Nitpick findings anchored to evidence.</li>
+<li><strong>Fix and re-screenshot</strong> — Blockers/High gate completion; Medium/Nit do not (<em>"Never report UI work 'done' without step 4. If you didn't look at it, it isn't finished."</em>, WORKFLOW.md:80).</li>
+</ol>
+<pre class="mermaid">flowchart TD
+    A["User request<br/>(+ detected stack)"] --> B["--design-system<br/>5 parallel domain searches<br/>+ ui-reasoning.csv decision rules"]
+    B --> C["Design system object<br/>pattern/colors/type/effects/anti-patterns"]
+    C -->|persist| C2["design-system/MASTER.md<br/>+ pages/*.md overrides"]
+    C --> D["frontend-design skill:<br/>commit to ONE tone + signature element"]
+    D --> E["Targeted --domain / --stack searches<br/>(ux, color, gsap, react, stack-specific)"]
+    E --> F["Build UI<br/>(shadcn MCP for React)"]
+    F --> G["Playwright/Chrome DevTools MCP:<br/>screenshot every viewport tier"]
+    G --> H{"Issues seen?"}
+    H -->|yes| F
+    H -->|no| I["design-review subagent:<br/>7-phase WCAG AA audit"]
+    I --> J{"Blockers/High?"}
+    J -->|yes| F
+    J -->|no| K["Ship"]
+</pre>
+<h2 id="core-beliefs-principles">Core beliefs / principles</h2>
+<ol>
+<li><strong>Search, don't stuff.</strong> <em>"read it on demand rather than loading it every time"</em> — SKILL.md:18.</li>
+<li><strong>Never fabricate a match.</strong> <em>"Do not fabricate output... Never present a 0-result search as if it returned data."</em> — SKILL.md:169-172.</li>
+<li><strong>Data over vibes for stack detection.</strong> <em>"Never assume a stack — a hardcoded default silently misroutes every recommendation."</em> — SKILL.md:71.</li>
+<li><strong>Rules must be closed and inert, never executable.</strong> <em>"Closed, non-executable grammar for design-system decision rules"</em> / <em>"never execute data."</em> — reasoning_contract.py:2,102.</li>
+<li><strong>Never silently discard prior decisions.</strong> <em>"<code>--persist</code> skips writing and leaves it untouched unless you also pass <code>--force</code>... Never use <code>--force</code> without explicit user authorization."</em> — SKILL.md:100-104.</li>
+<li><strong>Evidence over assumption in review.</strong> <em>"You do not guess from the code; you open the page in a real browser and observe it... no finding without something you observed."</em> — design-review.md:13,97.</li>
+<li><strong>Blockers gate, nitpicks don't.</strong> <em>"Distinguish 'broken' from 'I'd prefer.' Only Blockers/High should gate merging."</em> — design-review.md:93.</li>
+<li><strong>One dominant intent per query.</strong> <em>"Build each query around one dominant intent, using 2-5 meaningful terms... Do not persist unverified output."</em> — SKILL.md:57.</li>
+<li><strong>Provenance and license gates before promoting data.</strong> <code>"unlicensedFamiliesExcluded": true, "relevanceGateRequired": true</code> — catalog-summary.json <code>promotionPolicy</code>; the refresh workflow runs read-only, human-reviewed.</li>
+<li><strong>The visual-feedback loop is the whole point.</strong> <em>"Most AI design fails because the model never sees what it built and has no opinionated point of view."</em> — stack/README.md:7.</li>
+</ol>
+<h2 id="mechanics-worth-stealing">Mechanics worth stealing</h2>
+<p><strong>Knowledge base without context bloat.</strong> The catalog is CSV, not markdown-in-context: <code>styles.csv</code> (88 rows × 28 cols) and <code>google-fonts.csv</code> (1,935 rows) sit on disk and are queried via subprocess CLI (<code>python search.py "&lt;query&gt;" --domain style -n 3</code>), returning only top-N ranked rows. A from-scratch BM25 (<code>class BM25</code> in <code>core.py</code>, k1=1.5, b=0.75, stdlib <code>math.log</code>/<code>defaultdict</code> only — no numpy) ranks rows per domain, combined with regex/alias matching for exact IDs. <code>UNTRUNCATED_COLS</code> protects code snippets/checklists from display truncation while everything else caps at 300 chars in human-readable mode (<code>--json</code> for full data) — a deliberate token/readability tradeoff.</p>
+<p><strong>A closed grammar instead of free-text "rules."</strong> <code>ui-reasoning.csv</code>'s <code>Decision_Rules</code> column holds JSON like <code>{"if_data_heavy":["style:glassmorphism"]}</code>. <code>reasoning_contract.py</code> enforces an allow-list of ~35 condition names and action prefixes (<code>must_have|constraint|style|pattern|mode</code>), rejecting anything else at parse time. This is the one place the repo lets data drive behavior beyond simple lookup, fenced off from arbitrary code execution by construction.</p>
+<p><strong>Master + page-override persistence.</strong> <code>--design-system --persist</code> writes <code>design-system/&lt;slug&gt;/MASTER.md</code> once, then only page-specific <em>deltas</em> to <code>pages/&lt;page&gt;.md</code> — hierarchical retrieval (<em>"If the page file exists, prioritize its rules. If not, use the Master rules exclusively"</em>), so a multi-page build doesn't re-derive tokens per page.</p>
+<p><strong>Self-critique loop with a hard evidence bar.</strong> <code>design-review</code> is model-driven but constrained to observation-first reporting: <em>"If you could not open the page, say so plainly and report only the heuristic-script results — never invent findings"</em> (design-review.md:94-95). It has a scripted fallback (<code>design-audit.mjs</code>) for no-browser cases and a fixed severity taxonomy (Blockers/High/Medium/Nitpicks) mapping directly to a merge/no-merge decision.</p>
+<p><strong>Version-aware stack data instead of one "current" answer.</strong> <code>WEB_STACK_CURRENT_MAJORS</code> pins current majors (React 19, Next.js 16, Vue 3...) and stack CSVs carry <code>Status</code>/<code>Applies To</code>/<code>Verified At</code>; search returns <em>no results</em> rather than blending generations for an old major (<em>"search returns no results instead of mixing framework generations"</em>, README) — deliberate refusal over silently averaging stale and current advice.</p>
+<p><strong>Data integrity as CI, not vibes.</strong> <code>validate_data.py</code> (1,091 lines) checks header completeness, duplicate keys, JSON parseability across every CSV; 10 test modules (2,335 lines) plus a scheduled refresh workflow that only writes review artifacts, never commits (<em>"It never commits, pushes, opens a PR, or merges"</em>, README).</p>
+<h2 id="weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</h2>
+<ul>
+<li><strong>Count drift across surfaces.</strong> <code>skill.json</code> (84 styles, 98 UX guidelines) disagrees with the generated <code>catalog-summary.json</code> (88 styles / 79 searchable, 119 UX guidelines) and README's badge (192 "reasoning rules," 79 "searchable styles"). Five-plus files must be hand-synced; only semver is automated ("Version numbers are synchronized... during release preparation" — doesn't cover the counts).</li>
+<li><strong>Taste-by-catalog is still a catalog.</strong> The generator is a lookup-and-merge over pre-authored rows; it recombines ~88 styles × ~192 palettes × 74 pairings but cannot originate a new aesthetic. The repo implicitly admits this by delegating "commit to a look" to a <em>separate</em> <code>frontend-design</code> skill.</li>
+<li><strong>Two products, one install.</strong> The plugin bundles the nextlevelbuilder data engine with six <code>claudekit</code>-authored skills (logo, CIP, banners, slides, brand) the README's "Premium vs Basic" table frames as premium differentiators — yet their files are present in this open-source checkout. Whether these are functional freebies or mis-scoped inclusion isn't resolved by the repo itself.</li>
+<li><strong>Python subprocess dependency.</strong> Every search shells out to <code>python3 search.py</code>; the skill is inert without Python 3 on PATH, and Windows requires <code>python</code> not <code>python3</code>.</li>
+<li><strong>Stack coverage is thin and uneven.</strong> Individual stack files run 50-76 lines (<code>vue.csv</code> 50, <code>javafx.csv</code> 76) — a handful of rows per framework; heavy desktop users (WinUI/UWP/Avalonia) get comparatively little.</li>
+<li><strong>Review loop lives outside the installable plugin.</strong> The "see it and iterate" mechanism <code>stack/README.md</code> calls the differentiator is a separate starter-kit subtree, not part of <code>.claude-plugin/plugin.json</code> — installing the marketplace plugin gets data/search, not the Playwright-driven review agent.</li>
+<li><strong>Maintenance surface is large.</strong> 22 stack CSVs, a 1,935-row font catalog with license gating, a 1,512-icon upstream manifest, sha256 snapshotting, scheduled refresh — real recurring curation, evidenced by <code>docs/journals/</code> phase-by-phase "accessibility refresh" and "web stack freshness" entries dated August 2026.</li>
+</ul>
+<h2 id="fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</h2>
+<p><strong>Carries over directly:</strong> the <code>ux-guidelines.csv</code>/<code>app-interface.csv</code> priority table (accessibility → touch targets → performance) is a fast pre-delivery checklist on its own — a single <code>--domain ux "keyboard focus modal"</code> query answers a specific question in seconds. <code>--stack &lt;name&gt;</code> is similarly narrow and useful for a one-off lookup. The <code>design-review</code> 7-phase structure is a genuinely useful checklist even done by hand, with or without Playwright MCP.</p>
+<p><strong>Pure overhead for a single day-scoped feature:</strong> the full <code>--design-system</code> ceremony (5 parallel searches, decision-rule matching, MASTER.md + page-override persistence) targets multi-page products maintaining a design system across sessions — for one feature, picking a palette from <code>colors.csv</code> by hand is faster. The six bundled <code>claudekit</code> skills are irrelevant to shipping a feature and add install/context surface with no payoff. The provenance/licensing/refresh machinery is infrastructure for the <em>maintainers</em> of this data, not something a downstream engineer touches — evidence of rigor, not a tool to use.</p>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#tldr">TL;DR</a><a href="#inventory">Inventory</a><a href="#the-core-engineering-flow">The core engineering flow</a><a href="#core-beliefs-principles">Core beliefs / principles</a><a href="#mechanics-worth-stealing">Mechanics worth stealing</a><a href="#weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</a><a href="#fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>
