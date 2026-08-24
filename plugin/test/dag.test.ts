@@ -117,6 +117,38 @@ test("globIntersect on an empty tree correctly rejects two disjoint literal file
   assert.equal(globIntersect("src/api.ts", "src/other.ts", []), false);
 });
 
+// Regression cases for a live false negative an adversarial re-review found:
+// globToRegExp/segmentRegExp escaped `[` as a literal character (no POSIX
+// character-class support at all) and let `?` fall through to the "insert
+// literally" branch, where it's a live regex metachar (zero-or-one of the
+// preceding char) rather than "exactly one character" — silently making
+// owns globs using either construct invisible to D2, even though
+// hooks/sage-lane's runtime enforcement already implements both correctly
+// (fnmatch on the python branch, its own char-class parser on the node
+// branch). Reproduced end-to-end at the CLI (`sage dag lanes`) with a real
+// committed tree before this fix, not just as a unit-test artifact.
+test("globIntersect catches a POSIX character class against a matching literal (with and without a real tree)", () => {
+  assert.equal(globIntersect("src/[ab]*.ts", "src/api.ts", ["src/api.ts"]), true);
+  assert.equal(globIntersect("src/[ab]*.ts", "src/api.ts", []), true);
+});
+
+test("globIntersect catches `?` (single-char wildcard) against a matching literal (with and without a real tree)", () => {
+  assert.equal(globIntersect("src/a?.ts", "src/ab.ts", ["src/ab.ts"]), true);
+  assert.equal(globIntersect("src/a?.ts", "src/ab.ts", []), true);
+});
+
+test("globIntersect correctly rejects a negated character class against a literal it excludes", () => {
+  assert.equal(globIntersect("src/[!ab]*.ts", "src/api.ts", []), false);
+});
+
+test("globIntersect correctly accepts a negated character class against a literal it doesn't exclude", () => {
+  assert.equal(globIntersect("src/[!ab]*.ts", "src/xyz.ts", []), true);
+});
+
+test("globIntersect correctly rejects `?` against a literal of the wrong length", () => {
+  assert.equal(globIntersect("src/c?.ts", "src/ab.ts", []), false);
+});
+
 test("dag validate rejects a cycle, unknown depends_on, and owns **", () => {
   const cycle: Dag = {
     ...base,

@@ -246,16 +246,25 @@ function segmentsCanIntersect(a, b) {
 // is rare enough in real `owns` globs that we don't fully solve wildcard-vs-
 // wildcard intersection here — conservatively treated as compatible, which
 // can only produce a false positive, never a false negative.
+// A segment "has a wildcard" if it contains `*`, `?`, or an (at least
+// plausibly) unescaped `[` — the same three POSIX glob metacharacters
+// globToRegExp/segmentRegExp now translate. Getting this detection wrong in
+// either direction is exactly how the character-class/`?` false negative
+// happened in the first place: a segment like `a?.ts` or `[ab]*.ts` has no
+// `*` at position 0 but is still a live wildcard.
+function hasWildcard(s) {
+    return s.includes("*") || s.includes("?") || s.includes("[");
+}
 function segmentCompatible(x, y) {
     if (x === null || y === null)
         return true;
     if (x === "*" || y === "*")
         return true;
-    if (!x.includes("*") && !y.includes("*"))
+    if (!hasWildcard(x) && !hasWildcard(y))
         return x === y;
-    if (!x.includes("*"))
+    if (!hasWildcard(x))
         return segmentRegExp(y).test(x);
-    if (!y.includes("*"))
+    if (!hasWildcard(y))
         return segmentRegExp(x).test(y);
     return true; // both sides wildcarded — conservative true, see comment above
 }
@@ -263,9 +272,19 @@ function segmentCompatible(x, y) {
 // assumes a full normalized glob string, not an isolated segment.
 function segmentRegExp(seg) {
     let re = "";
-    for (const c of seg) {
+    for (let i = 0; i < seg.length; i++) {
+        const c = seg[i];
         if (c === "*")
             re += "[^/]*";
+        else if (c === "?" || c === "[") {
+            const t = translateBracketOrQuestion(seg, i);
+            if (t) {
+                re += t.chunk;
+                i = t.next - 1;
+                continue;
+            }
+            re += ".+^$()[]{}|\\".includes(c) ? "\\" + c : c;
+        }
         else if (".+^$()[]{}|\\".includes(c))
             re += "\\" + c;
         else
@@ -297,6 +316,43 @@ export function expandAgainstTree(glob, treePaths) {
     const re = globToRegExp(glob);
     return treePaths.filter((p) => re.test(p));
 }
+// POSIX glob character-class translation, shared by globToRegExp and
+// segmentRegExp. `[...]`/`[!...]` and `?` are standard POSIX glob syntax —
+// hooks/sage-lane already implements both correctly (its python branch via
+// fnmatch, its node branch with its own from-scratch parser) — this used to
+// be missing here entirely: `[` was escaped as a literal character and `?`
+// fell through to the "insert literally" branch, where it's a live regex
+// metachar (zero-or-one of the preceding char) rather than "exactly one
+// character," silently making false negatives possible for any owns glob
+// using either. Returns the consumed-up-to index so callers can resume.
+function translateBracketOrQuestion(g, i) {
+    const c = g[i];
+    if (c === "?")
+        return { chunk: "[^/]", next: i + 1 };
+    if (c !== "[")
+        return null;
+    let j = i + 1;
+    let cls = "[";
+    if (g[j] === "!" || g[j] === "^") {
+        cls += "^";
+        j++;
+    }
+    // A `]` immediately after `[` or `[!` is a literal member of the class,
+    // per POSIX glob semantics, not the closing bracket.
+    if (g[j] === "]") {
+        cls += "\\]";
+        j++;
+    }
+    while (j < g.length && g[j] !== "]") {
+        const ch = g[j];
+        cls += "\\^$.|?*+()[]{}".includes(ch) ? "\\" + ch : ch;
+        j++;
+    }
+    if (j >= g.length)
+        return null; // unterminated class — treat `[` as literal below
+    cls += "]";
+    return { chunk: cls, next: j + 1 };
+}
 function globToRegExp(glob) {
     const g = normalizeGlob(glob);
     let re = "";
@@ -310,6 +366,15 @@ function globToRegExp(glob) {
         }
         else if (c === "*")
             re += "[^/]*";
+        else if (c === "?" || c === "[") {
+            const t = translateBracketOrQuestion(g, i);
+            if (t) {
+                re += t.chunk;
+                i = t.next - 1;
+                continue;
+            }
+            re += ".+^$()[]{}|\\".includes(c) ? "\\" + c : c;
+        }
         else if (".+^$()[]{}|\\".includes(c))
             re += "\\" + c;
         else
