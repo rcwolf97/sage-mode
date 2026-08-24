@@ -20,6 +20,42 @@
       "acceptance": ["GET /x returns 200 with a bearer token present"],
       "verify": "npm test",
       "risk": "low"
+    },
+    {
+      "id": "n3",
+      "title": "Typed source glob work",
+      "role": "backend",
+      "owns": ["src/**/*.ts"],
+      "acceptance": ["GET /y returns 200 with a typed response body"],
+      "verify": "npm test",
+      "risk": "low"
+    },
+    {
+      "id": "n4",
+      "title": "Single API source file",
+      "role": "backend",
+      "owns": ["src/api/foo.ts"],
+      "acceptance": ["POST /y returns 201 when the payload validates"],
+      "verify": "npm test",
+      "risk": "low"
+    },
+    {
+      "id": "n5",
+      "title": "Fixture bundle glob work",
+      "role": "backend",
+      "owns": ["plugin/evals/fixtures/*.json"],
+      "acceptance": ["GET /z returns 200 with the fixture bundle contents"],
+      "verify": "npm test",
+      "risk": "low"
+    },
+    {
+      "id": "n6",
+      "title": "Overlap fixture literal file",
+      "role": "backend",
+      "owns": ["plugin/evals/fixtures/overlap-dag.json"],
+      "acceptance": ["POST /z returns 201 when the fixture bundle validates"],
+      "verify": "npm test",
+      "risk": "low"
     }
   ]
 }

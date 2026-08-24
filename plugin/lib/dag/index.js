@@ -140,16 +140,148 @@ export function plan(dag) {
     }
     return { waves };
 }
-export function globIntersect(a, b) {
+export function globIntersect(a, b, treePaths) {
     if (a === b)
         return true;
     const na = normalizeGlob(a);
     const nb = normalizeGlob(b);
     if (na === nb)
         return true;
-    if (prefixOverlap(na, nb) || prefixOverlap(nb, na))
+    // Primary decision procedure (tech-spec §6.3): expand both globs against
+    // the real repo file tree and check whether the resulting path sets
+    // intersect. This is exact — no wildcard-position blind spot — for any
+    // path the tree currently contains, which is what the false-negative
+    // table (src/*.ts vs src/api.ts, src/**/*.ts vs src/api/foo.ts, etc.)
+    // requires: those only ever went undetected because the old code looked
+    // only at literal prefixes, never at what the globs actually match.
+    const tree = treePaths ?? repoTreePaths();
+    const matchesA = expandAgainstTree(na, tree);
+    const matchesB = expandAgainstTree(nb, tree);
+    if (matchesA.length > 0 && matchesB.length > 0) {
+        const setB = new Set(matchesB);
+        return matchesA.some((p) => setB.has(p));
+    }
+    // Fallback: one or both globs matched zero paths in the current tree —
+    // e.g. two nodes both creating brand-new files under a directory that
+    // doesn't exist yet. Tree expansion has nothing to compare in that case.
+    // This is not a rare corner case: `/sage-dag` runs against files a sprint
+    // is about to CREATE as often as files it's touching, so "neither side
+    // has a tree match yet" is a realistic state, not just an edge case.
+    //
+    // A plain trailing-`**`-strip prefix comparison (prefixOverlap, kept below
+    // for the narrow shapes it still catches cheaply) reintroduces exactly the
+    // false-negative class this fix exists to close whenever the wildcard
+    // isn't trailing — `src/*.ts` vs `src/api.ts` share no literal prefix once
+    // you strip a trailing star that neither pattern has. So the primary
+    // no-tree-match fallback is a real pattern-vs-pattern intersection check
+    // (segmentsCanIntersect, below): could ANY concrete path satisfy both
+    // globs, reasoning from the glob syntax alone. prefixOverlap only runs as
+    // a last-resort OR on top of that, which can only ever add a false
+    // positive, never remove a true one.
+    return segmentsCanIntersect(na, nb) || prefixOverlap(na, nb) || prefixOverlap(nb, na);
+}
+// Do the glob patterns `a` and `b` — reasoned about purely as patterns, with
+// no filesystem involved — admit at least one concrete path satisfying both?
+// This is the fallback's fallback: it runs when tree-expansion had nothing
+// to compare against on one or both sides. Segment semantics match
+// globToRegExp: `**` matches zero or more whole path segments, `*` matches
+// within a single segment (never crosses `/`), everything else is literal.
+//
+// Implemented as a memoized product walk over the two segment sequences
+// (classic finite-automaton-intersection shape for this restricted wildcard
+// dialect — decidable and cheap for the segment counts a real `owns` glob
+// ever has). Conservative by construction: a segment pair it cannot prove
+// incompatible is treated as compatible, so this can only ever return a
+// false positive, never a false negative.
+function segmentsCanIntersect(a, b) {
+    const as = a.split("/");
+    const bs = b.split("/");
+    const memo = new Map();
+    function rec(i, j) {
+        const key = i + "," + j;
+        const cached = memo.get(key);
+        if (cached !== undefined)
+            return cached;
+        // Prevent infinite recursion on repeated "both sides ** stay put" states.
+        memo.set(key, true);
+        let result;
+        if (i === as.length && j === bs.length) {
+            result = true;
+        }
+        else if (i === as.length) {
+            result = bs.slice(j).every((s) => s === "**");
+        }
+        else if (j === bs.length) {
+            result = as.slice(i).every((s) => s === "**");
+        }
+        else {
+            const A = as[i];
+            const B = bs[j];
+            if (A === "**" && B === "**") {
+                result = rec(i + 1, j) || rec(i, j + 1) || rec(i + 1, j + 1);
+            }
+            else if (A === "**") {
+                // ** consumes zero segments (drop it) or one segment that must also
+                // satisfy B's current segment, staying at i for further consumption.
+                result = rec(i + 1, j) || (segmentCompatible(null, B) && rec(i, j + 1));
+            }
+            else if (B === "**") {
+                result = rec(i, j + 1) || (segmentCompatible(A, null) && rec(i + 1, j));
+            }
+            else {
+                result = segmentCompatible(A, B) && rec(i + 1, j + 1);
+            }
+        }
+        memo.set(key, result);
+        return result;
+    }
+    return rec(0, 0);
+}
+// Can a single path segment simultaneously match single-segment patterns `x`
+// and `y`? `null` means "any segment" (used when ** is consuming one
+// segment and the other side has already been fully accounted for).
+// Handles: bare `*`, no-wildcard-either-side, one-side-literal-vs-wildcarded,
+// and exact equality. A segment containing an internal `*` compared against
+// another segment ALSO containing an internal `*` (e.g. `a*.ts` vs `*b.ts`)
+// is rare enough in real `owns` globs that we don't fully solve wildcard-vs-
+// wildcard intersection here — conservatively treated as compatible, which
+// can only produce a false positive, never a false negative.
+function segmentCompatible(x, y) {
+    if (x === null || y === null)
         return true;
-    return false;
+    if (x === "*" || y === "*")
+        return true;
+    if (!x.includes("*") && !y.includes("*"))
+        return x === y;
+    if (!x.includes("*"))
+        return segmentRegExp(y).test(x);
+    if (!y.includes("*"))
+        return segmentRegExp(x).test(y);
+    return true; // both sides wildcarded — conservative true, see comment above
+}
+// Single-segment (no `/`) glob-to-regex, since globToRegExp's `**` handling
+// assumes a full normalized glob string, not an isolated segment.
+function segmentRegExp(seg) {
+    let re = "";
+    for (const c of seg) {
+        if (c === "*")
+            re += "[^/]*";
+        else if (".+^$()[]{}|\\".includes(c))
+            re += "\\" + c;
+        else
+            re += c;
+    }
+    return new RegExp("^" + re + "$");
+}
+function repoTreePaths(cwd) {
+    const root = gitRoot(cwd) || cwd || process.cwd();
+    const res = git(["ls-files"], root);
+    if (res.status !== 0)
+        return [];
+    return res.stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
 }
 function normalizeGlob(g) {
     return g.replace(/^\.\//, "").replace(/\/$/, "");
@@ -187,6 +319,7 @@ function globToRegExp(glob) {
 }
 export function laneIntersections(dag, wave) {
     const v = [];
+    const tree = repoTreePaths();
     const nodes = wave.map((id) => dag.nodes.find((n) => n.id === id)).filter(Boolean);
     for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
@@ -194,7 +327,7 @@ export function laneIntersections(dag, wave) {
             const b = nodes[j];
             for (const ga of a.owns) {
                 for (const gb of b.owns) {
-                    if (globIntersect(ga, gb)) {
+                    if (globIntersect(ga, gb, tree)) {
                         v.push({
                             code: "D2",
                             message: `${a.id} and ${b.id} intersect on ${ga} ∩ ${gb}`,

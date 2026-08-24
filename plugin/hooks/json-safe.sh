@@ -5,7 +5,7 @@
 json_read() {
   JSON_IN=$(dd bs=65536 count=8 2>/dev/null || cat)
   # Strip UTF-8 BOM
-  JSON_IN=$(printf '%s' "$JSON_IN" | sed $'1s/^\xEF\xBB\xBF//')
+  JSON_IN=$(printf '%s' "$JSON_IN" | sed "1s/^$(printf '\357\273\277')//")
 }
 
 json_get() {

@@ -33,6 +33,20 @@ function claudeAvailable() {
     const r = spawnSync("claude", ["--version"], { encoding: "utf8", timeout: 2500 });
     return r.status === 0;
 }
+// Lane B's entire premise is flat-rate subscription billing via the `claude` CLI. A
+// child process inherits the parent's environment, so an ANTHROPIC_API_KEY set anywhere
+// upstream (the user's shell, a profile script, CI) can make `claude -p` silently route
+// this call through metered API billing instead — defeating the cost architecture with
+// no indication to the user. Warn loudly, once per consult() call, without blocking it.
+export function warnIfApiKeyInherited() {
+    if (!process.env.ANTHROPIC_API_KEY)
+        return;
+    process.stderr.write("sage consult: warning: ANTHROPIC_API_KEY is set in this environment.\n" +
+        "sage consult: warning: the `claude` CLI may use it to route this Lane B call through\n" +
+        "sage consult: warning: METERED API BILLING instead of your flat-rate Claude subscription.\n" +
+        "sage consult: warning: unset it before running sage — e.g. `unset ANTHROPIC_API_KEY` — or\n" +
+        "sage consult: warning: remove the export from your shell profile if it is set there.\n");
+}
 export function consult(opts) {
     try {
         assertTrusted(opts.cwd);
@@ -65,6 +79,7 @@ export function consult(opts) {
     const resume = opts.resume || (opts.session && existsSync(sessionFile) ? readFileSync(sessionFile, "utf8").trim() : "");
     if (resume)
         args.push("--resume", resume);
+    warnIfApiKeyInherited();
     const r = spawnSync("claude", args, { encoding: "utf8", cwd: opts.cwd || process.cwd(), maxBuffer: 20 * 1024 * 1024 });
     const out = r.stdout || "";
     if ((r.stderr || "").toLowerCase().includes("rate_limit") || /rate.?limit/i.test(out)) {

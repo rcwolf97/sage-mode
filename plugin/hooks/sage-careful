@@ -5,6 +5,11 @@ set -eu
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 . "$DIR/json-safe.sh"
 json_read
+# POSIX-portable literal newline for use inside case patterns (the $'\n'
+# ANSI-C-quote form is a bash extension and is silently a no-op glob under
+# dash, defeating embedded-newline / compound-command detection).
+NL='
+'
 if [ -z "${JSON_IN:-}" ]; then
   printf '%s\n' '{}'
   exit 0
@@ -40,12 +45,12 @@ esac
 
 IS_SIMPLE=1
 case "$CMD" in
-  *';'*|*'&&'*|*'||'*|*'|'*|*$'\n'*) IS_SIMPLE=0 ;;
+  *';'*|*'&&'*|*'||'*|*'|'*|*"$NL"*) IS_SIMPLE=0 ;;
 esac
 
 # safe exceptions — anchored whole-command, single-line only
 case "$CMD" in
-  *$'\n'*) ;;
+  *"$NL"*) ;;
   'rm -rf node_modules'|'rm -rf .next'|'rm -rf dist'|'rm -rf __pycache__'|'rm -rf .cache'|'rm -rf build'|'rm -rf .turbo'|'rm -rf coverage'|\
   'rm -rf ./node_modules'|'rm -rf ./dist')
     printf '%s\n' '{}'
@@ -65,12 +70,55 @@ ask() {
 }
 
 if [ "$IS_SIMPLE" = 1 ]; then
-  # token-by-token recursive delete of exactly / ~ $HOME /*
-  case "$CMD" in
-    'rm -rf /'|'rm -rf /'|'rm -r /'|'rm -fr /') deny "[careful] Refusing recursive delete of /." ;;
-    'rm -rf ~'|'rm -rf ~/'|'rm -rf $HOME'|'rm -rf "$HOME"'|'rm -rf ~/*') deny "[careful] Refusing recursive delete of home." ;;
-    'rm -rf /*') deny "[careful] Refusing recursive delete of /*." ;;
-  esac
+  # Token-aware recursive delete of exactly / ~ $HOME /*.
+  #
+  # Tokenize on whitespace (collapsing repeats) and match on the ARGUMENT
+  # SET rather than the literal string, so extra flags anywhere in the
+  # command (e.g. --no-preserve-root), a leading `sudo`, doubled spaces, and
+  # flag-order/case variants (-rf / -fr / -Rf / "-r -f") don't slip past an
+  # exact-string check. `set -f` guards against the shell glob-expanding a
+  # bare `/*` token against the real filesystem during the split.
+  set -f
+  # shellcheck disable=SC2086
+  set -- $CMD
+  set +f
+  HAS_RM=0
+  HAS_R=0
+  HAS_F=0
+  TARGET_ROOT=0
+  TARGET_HOME=0
+  TARGET_ROOTSTAR=0
+  for tok in "$@"; do
+    case "$tok" in
+      rm) HAS_RM=1 ;;
+    esac
+    case "$tok" in
+      --recursive) HAS_R=1 ;;
+      --force) HAS_F=1 ;;
+      --*) : ;; # any other long option: ignore, never substring-matched
+      -?*)
+        # short-option cluster, e.g. -r -f -rf -fr -Rf: any letter order,
+        # case-insensitive on r (rm accepts -R as a recursive alias too)
+        case "$tok" in *r*|*R*) HAS_R=1 ;; esac
+        case "$tok" in *f*|*F*) HAS_F=1 ;; esac
+        ;;
+    esac
+    case "$tok" in
+      '/') TARGET_ROOT=1 ;;
+      '~'|'~/'|'$HOME'|'"$HOME"'|'~/*') TARGET_HOME=1 ;;
+      '/*') TARGET_ROOTSTAR=1 ;;
+    esac
+  done
+  # -f is not required to deny: the original literal-pattern list already
+  # hard-denied bare `rm -r /` (no force flag) alongside `rm -rf /`, since a
+  # non-interactive recursive delete of / is dangerous with or without -f.
+  # HAS_F is tracked only so `rm -f /` alone (no recursion — genuinely
+  # harmless: rm errors on "/" being a directory) does not.
+  if [ "$HAS_RM" = 1 ] && [ "$HAS_R" = 1 ]; then
+    [ "$TARGET_ROOT" = 1 ] && deny "[careful] Refusing recursive delete of /."
+    [ "$TARGET_HOME" = 1 ] && deny "[careful] Refusing recursive delete of home."
+    [ "$TARGET_ROOTSTAR" = 1 ] && deny "[careful] Refusing recursive delete of /*."
+  fi
   # force-push to default branch
   case "$CMD" in
     *'git push --force'*|*'git push -f '*)

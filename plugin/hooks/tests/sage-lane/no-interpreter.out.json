@@ -1,0 +1,1 @@
+{"permission": "deny", "agent_message": "[lane] Neither python3 nor node is available to parse and enforce the lane. Blocked (fail closed)."}

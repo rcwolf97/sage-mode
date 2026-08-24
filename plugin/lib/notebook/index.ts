@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, readd
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { marked } from "../vendor/marked/marked.esm.js";
-import { parseFrontmatter, projectDocsDir } from "../util.js";
+import { parseFrontmatter, projectDocsDir, gitRoot } from "../util.js";
 
 const SHELL_CSS_HREF = "assets/notebook.css";
 const MERMAID_HREF = "assets/mermaid.min.js";
@@ -182,14 +182,27 @@ function basenameTitle(p: string): string {
 }
 
 function inferDocsRoot(srcPath: string): string {
-  let dir = dirname(resolve(srcPath));
+  const startDir = dirname(resolve(srcPath));
+  // Resolve the ceiling from the FILE's own location, never from process.cwd() —
+  // cwd can be the plugin's own SAGE_HOME install dir (a content-hashed cache path
+  // that changes on every update) rather than the project actually being rendered.
+  // See tech-spec §4.5: skills/renderers must not trust ambient cwd for path resolution.
+  const projRoot = gitRoot(startDir);
+  let dir = startDir;
   for (let i = 0; i < 8; i++) {
-    if (existsSync(join(dir, "assets", "notebook.css")) || dir.endsWith("/docs")) return dir.endsWith("/docs") ? dir : join(dir);
+    if (existsSync(join(dir, "assets", "notebook.css")) || dir.endsWith("/docs")) return dir;
+    if (projRoot && resolve(dir) === resolve(projRoot)) break;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return projectDocsDir();
+  // No docs-shaped ancestor found under the file's own project. Resolve the project's
+  // docs root the same way `projectDocsDir` does elsewhere (git root + .sage/config.json),
+  // anchored on the file, not on cwd.
+  if (projRoot) return projectDocsDir(projRoot);
+  // No enclosing git project either (e.g. an isolated fixture) — assets are expected
+  // alongside the file itself.
+  return startDir;
 }
 
 export function renderAll(root?: string, options: RenderOptions = {}): string[] {

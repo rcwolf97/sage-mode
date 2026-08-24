@@ -4,22 +4,66 @@ set -eu
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 . "$DIR/json-safe.sh"
 json_read
+
+# .sage/parent-role is stashed by sage-build immediately before dispatching a
+# subagent, naming the CURRENT parent's role. It must never outlive the
+# dispatch it was written for — read it exactly once, right here, and delete
+# it immediately, whatever the outcome of this invocation. Otherwise a marker
+# left over from (say) a reviewer dispatch keeps denying every unrelated
+# dispatch that comes after it, forever, until someone notices and deletes it
+# by hand.
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+MARKER="$ROOT/.sage/parent-role"
+PARENT=""
+if [ -f "$MARKER" ]; then
+  PARENT=$(cat "$MARKER" 2>/dev/null || true)
+  rm -f "$MARKER" 2>/dev/null || true
+fi
+
+# The real decision logic below needs python3 or node (jq alone can validate
+# JSON but can't run the role-card lookup). Check that first, independent of
+# payload validity, so a missing-interpreter environment gets the specific
+# "which interpreter is missing" message rather than a generic parse-failure
+# one that would be misleading (the payload may be perfectly valid JSON).
+if ! command -v python3 >/dev/null 2>&1 && ! command -v node >/dev/null 2>&1; then
+  printf '%s\n' '{"permission":"deny","agent_message":"[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."}'
+  exit 0
+fi
+
 if [ -z "${JSON_IN:-}" ] || ! json_valid; then
-  python3 -c 'import json; print(json.dumps({"permission":"deny","agent_message":"[solo] Could not parse payload. Blocked (fail closed)."}))' 2>/dev/null || printf '%s\n' '{"permission":"deny"}'
+  printf '%s\n' '{"permission":"deny","agent_message":"[solo] Could not parse payload. Blocked (fail closed)."}'
   exit 0
 fi
 TYPE=$(json_get subagent_type)
-# parent role is stashed by sage-build in .sage/parent-role when dispatching
-ROOT="${CURSOR_PROJECT_DIR:-.}"
-PARENT=""
-[ -f "$ROOT/.sage/parent-role" ] && PARENT=$(cat "$ROOT/.sage/parent-role")
+
+if command -v python3 >/dev/null 2>&1; then
 python3 - "$TYPE" "$PARENT" <<'PY'
 import json, sys
 typ, parent = sys.argv[1], sys.argv[2]
 no_children = {"reviewer", "red-team", "design-critic"}
 if parent in no_children:
-    print(json.dumps({"permission":"deny","agent_message":"[solo] Review is terminal — this role cannot spawn subagents."}))
+    typ = typ or "unknown"
+    print(json.dumps({
+        "permission": "deny",
+        "agent_message": f"[solo] Review is terminal — role '{parent}' cannot spawn subagents (attempted: {typ})."
+    }))
 else:
     print("{}")
 PY
-exit 0
+elif command -v node >/dev/null 2>&1; then
+node - "$TYPE" "$PARENT" <<'JS'
+const [typ, parent] = process.argv.slice(2);
+const noChildren = new Set(["reviewer", "red-team", "design-critic"]);
+if (noChildren.has(parent)) {
+  const t = typ || "unknown";
+  process.stdout.write(JSON.stringify({
+    permission: "deny",
+    agent_message: `[solo] Review is terminal — role '${parent}' cannot spawn subagents (attempted: ${t}).`
+  }) + "\n");
+} else {
+  process.stdout.write("{}\n");
+}
+JS
+else
+  printf '%s\n' '{"permission":"deny","agent_message":"[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."}'
+fi

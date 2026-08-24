@@ -1,11 +1,19 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, writeSync, appendFileSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, writeSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { git, gitRoot, projectSageDir, sha256 } from "../util.js";
 const LOG_MAX = 2 * 1024 * 1024;
 const HEX40 = /^[0-9a-f]{40}$/;
+// Matches an allow-path entry on a full path segment boundary — never a raw
+// string prefix — so e.g. "CHANGELOG.md" does not also match
+// "CHANGELOG.md.bak" (or vice versa). A trailing "*" (e.g. "dist/*") opts an
+// entry into directory-prefix matching; anything else must match exactly.
+function matchesAllowPath(path, entry) {
+    const dir = (entry.endsWith("*") ? entry.slice(0, -1) : entry).replace(/\/$/, "");
+    return path === dir || path.startsWith(dir + "/");
+}
 export function wtree(cwd) {
     const root = gitRoot(cwd);
     if (!root)
@@ -17,10 +25,17 @@ export function wtree(cwd) {
     const tmp = join(tmpdir(), `sage-wtree-${process.pid}-${Date.now()}`);
     const env = { ...process.env, GIT_INDEX_FILE: tmp };
     try {
+        let seeded = false;
         if (realPath && existsSync(realPath)) {
-            spawnSync("cp", [realPath, tmp], { encoding: "utf8" });
+            try {
+                copyFileSync(realPath, tmp);
+                seeded = true;
+            }
+            catch (err) {
+                process.stderr.write(`sage evidence: warning: could not copy index for fast-path fingerprint, losing the 40x stat-cache speedup (falling back to git read-tree HEAD): ${String(err)}\n`);
+            }
         }
-        else {
+        if (!seeded) {
             const rt = spawnSync("git", ["read-tree", "HEAD"], { cwd: root, env, encoding: "utf8" });
             if (rt.status !== 0)
                 return null;
@@ -41,24 +56,38 @@ export function wtree(cwd) {
         }
     }
 }
-export function evidencePath(root) {
+export function evidencePath(root, sprintId) {
     const sage = projectSageDir(root);
-    const sprint = activeSprintDir(root);
+    const sprint = activeSprintDir(root, sprintId);
     return join(sprint || join(sage, "sprints", "00"), "evidence.jsonl");
 }
-export function activeSprintDir(root) {
+// NOTE: `sprintId`, when given, is used explicitly instead of falling back to
+// "lexicographically last" — this is what lets `evidence check`/`run` target
+// a specific sprint's ledger (see tech-spec.md §5.7) instead of silently
+// reading whatever sprint directory happens to sort last on disk. Omitting it
+// preserves the prior default (lexicographically-last) for backward compat.
+// TODO(cli): lib/cli.ts does not yet thread an explicit sprint through here —
+// `sage evidence run|check` always call with no sprintId today. `sage board`
+// already has a `--sprint S` flag (see lib/cli.ts ~line 292) that could be
+// mirrored for `evidence run|check` so callers can opt in explicitly; that
+// CLI wiring is out of this module's ownership and is left for the CLI owner.
+export function activeSprintDir(root, sprintId) {
     const sage = projectSageDir(root);
     const sprints = join(sage, "sprints");
     if (!existsSync(sprints) || !statSync(sprints).isDirectory())
         return null;
+    if (sprintId) {
+        const explicit = join(sprints, sprintId);
+        return existsSync(explicit) && statSync(explicit).isDirectory() ? explicit : null;
+    }
     const dirs = readdirSync(sprints)
         .map((n) => join(sprints, n))
         .filter((p) => statSync(p).isDirectory())
         .sort();
     return dirs.at(-1) || null;
 }
-export function readEvidence(root) {
-    const p = evidencePath(root);
+export function readEvidence(root, sprintId) {
+    const p = evidencePath(root, sprintId);
     if (!existsSync(p))
         return [];
     return readFileSync(p, "utf8")
@@ -81,7 +110,7 @@ export async function run(opts) {
     const cmdStr = opts.command.join(" ");
     const cmdHash = sha256(cmdStr);
     const sage = projectSageDir(cwd);
-    const sprint = activeSprintDir(cwd) || join(sage, "sprints", "00");
+    const sprint = activeSprintDir(cwd, opts.sprintId) || join(sage, "sprints", "00");
     const logsDir = join(sprint, "logs");
     try {
         mkdirSync(logsDir, { recursive: true });
@@ -157,7 +186,7 @@ export async function run(opts) {
 }
 export function check(opts) {
     const cwd = opts.cwd || process.cwd();
-    const recs = readEvidence(cwd).filter((r) => r.label === opts.label);
+    const recs = readEvidence(cwd, opts.sprintId).filter((r) => r.label === opts.label);
     const rec = recs.at(-1);
     if (!rec)
         return { grade: "STALE", reason: "no record" };
@@ -180,7 +209,7 @@ export function check(opts) {
     if (now !== rec.wtree) {
         const diff = git(["diff", "--name-only", rec.wtree, now], cwd).stdout.trim().split("\n").filter(Boolean);
         const allow = opts.allowPaths || [];
-        const outside = diff.filter((p) => !allow.some((a) => p === a || p.startsWith(a.replace(/\*$/, "") || a)));
+        const outside = diff.filter((p) => !allow.some((a) => matchesAllowPath(p, a)));
         if (outside.length === 0 && diff.length) {
             return { grade: "FRESH", reason: "diff confined to allow-paths", record: rec };
         }
