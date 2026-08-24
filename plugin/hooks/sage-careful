@@ -82,16 +82,28 @@ if [ "$IS_SIMPLE" = 1 ]; then
   # shellcheck disable=SC2086
   set -- $CMD
   set +f
+  # Anchor: is `rm` actually the command being invoked, not just a token
+  # that happens to appear somewhere in the argument list? An adversarial
+  # re-review found this loop originally scanned every token unconditionally
+  # for a literal `rm`, so `echo rm -rf /` — which never runs rm at all —
+  # was hard-denied: the "rm" token from echo's own argument tripped it.
+  # gstack's equivalent check anchors the same way this now does
+  # (`^(sudo )?rm\b`); mirror that rather than reinvent it. `\rm` (the
+  # common alias-bypass spelling) is also accepted as the command. Checked
+  # against the *unshifted* $1/$2 so the token list below is unaffected.
+  CMD_TOK1=$1
+  CMD_TOK2=${2:-}
   HAS_RM=0
+  case "$CMD_TOK1" in
+    rm | \\rm) HAS_RM=1 ;;
+    sudo) case "$CMD_TOK2" in rm | \\rm) HAS_RM=1 ;; esac ;;
+  esac
   HAS_R=0
   HAS_F=0
   TARGET_ROOT=0
   TARGET_HOME=0
   TARGET_ROOTSTAR=0
   for tok in "$@"; do
-    case "$tok" in
-      rm) HAS_RM=1 ;;
-    esac
     case "$tok" in
       --recursive) HAS_R=1 ;;
       --force) HAS_F=1 ;;
