@@ -1,0 +1,10 @@
+{
+  "severity": "HIGH",
+  "confidence": 8,
+  "path": "src/api/ingest.ts",
+  "line": 142,
+  "category": "security",
+  "summary": "Rate limit key is derived from a header the client controls.",
+  "evidence": "const key = req.headers['x-api-key'] ?? req.ip",
+  "specialist": "security"
+}

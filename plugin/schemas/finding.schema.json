@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sage-mode review finding",
+  "type": "object",
+  "required": ["severity", "confidence", "path", "category", "summary", "specialist"],
+  "additionalProperties": true,
+  "properties": {
+    "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "NITPICK"] },
+    "confidence": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "path": { "type": "string", "minLength": 1 },
+    "line": { "type": "integer", "minimum": 1 },
+    "category": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "string" },
+    "fix": { "type": "string" },
+    "test_stub": { "type": "string" },
+    "fingerprint": { "type": "string" },
+    "specialist": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+# sage-bootstrap — sessionStart. Inject <= 60 lines of sprint state + SAGE_HOME.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+HOME_CFG="${HOME:-}/.sage/config.json"
+SAGE_HOME=""
+if [ -f "$HOME_CFG" ]; then
+  SAGE_HOME=$(sed -n 's/.*"sageHome"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HOME_CFG")
+fi
+[ -n "$SAGE_HOME" ] || SAGE_HOME="$DIR/.."
+SPRINT=""
+LEDGER=""
+if [ -d "$ROOT/.sage/sprints" ]; then
+  LEDGER=$(find "$ROOT/.sage/sprints" -name ledger.md 2>/dev/null | sort | tail -n 1 || true)
+  if [ -n "$LEDGER" ]; then
+    SPRINT=$(basename "$(dirname "$LEDGER")" 2>/dev/null || true)
+  fi
+fi
+CTX=$(printf 'sage-mode session\nSAGE_HOME=%s\nsprint=%s\n' "$SAGE_HOME" "${SPRINT:-none}")
+if [ -n "$LEDGER" ] && [ -f "$LEDGER" ]; then
+  CTX=$(printf '%s\n%s\n' "$CTX" "$(head -n 40 "$LEDGER")")
+fi
+CTX=$(printf '%s\n' "$CTX" | awk 'NR<=60')
+SAGE_HOME="$SAGE_HOME" SAGE_SPRINT="${SPRINT:-}" python3 -c '
+import json, os, sys
+ctx = sys.stdin.read()
+print(json.dumps({
+  "env": {"SAGE_HOME": os.environ.get("SAGE_HOME",""), "SAGE_SPRINT": os.environ.get("SAGE_SPRINT","")},
+  "additional_context": ctx
+}))
+' <<EOF
+$CTX
+EOF

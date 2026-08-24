@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "sprint": "01-overlap",
+  "base": "main",
+  "nodes": [
+    {
+      "id": "n1",
+      "title": "API handler work",
+      "role": "backend",
+      "owns": ["src/**"],
+      "acceptance": ["POST /x returns 401 without a bearer token"],
+      "verify": "npm test",
+      "risk": "low"
+    },
+    {
+      "id": "n2",
+      "title": "API sibling work",
+      "role": "backend",
+      "owns": ["src/api/**"],
+      "acceptance": ["GET /x returns 200 with a bearer token present"],
+      "verify": "npm test",
+      "risk": "low"
+    }
+  ]
+}

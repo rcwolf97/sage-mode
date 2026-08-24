@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Five Repos, Compared · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>Five Repos, Compared</h1>
+    <div class="sub">What each one fundamentally believes, where they conflict, and what none of them solve</div>
+  </div>
+  <p>What five different people believe about how software should get built by agents — and what that implies for <code>sage-mode</code>.</p>
+<p>Analyzed 2026-08-21 against these commits:</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Repo</th>
+<th>Commit</th>
+<th>Author</th>
+<th>Size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/addyosmani/agent-skills">agent-skills</a></td>
+<td><code>df1edb2</code></td>
+<td>Addy Osmani</td>
+<td>24 skills, 4 personas, 8 commands, 5 hooks</td>
+</tr>
+<tr>
+<td><a href="https://github.com/EveryInc/compound-engineering-plugin">compound-engineering-plugin</a></td>
+<td><code>12d3d8c</code></td>
+<td>Every Inc / Kieran Klaassen</td>
+<td>33 skills, ~11k LOC converter CLI, 0 hooks</td>
+</tr>
+<tr>
+<td><a href="https://github.com/garrytan/gstack">gstack</a></td>
+<td><code>51932ec</code></td>
+<td>Garry Tan</td>
+<td>53 command units, 88 bin/ tools, 7 hooks</td>
+</tr>
+<tr>
+<td><a href="https://github.com/obra/superpowers">superpowers</a></td>
+<td><code>b36e082</code></td>
+<td>Jesse Vincent</td>
+<td>14 skills, 1 hook, 0 dependencies</td>
+</tr>
+<tr>
+<td><a href="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill">ui-ux-pro-max-skill</a></td>
+<td><code>bc826e2</code></td>
+<td>nextlevelbuilder</td>
+<td>7 skills, 22 CSVs, BM25 search engine</td>
+</tr>
+</tbody>
+</table></div>
+<p>Per-repo teardowns live beside this file: <a href="./agent-skills.html"><code>agent-skills.md</code></a>, <a href="./compound-engineering-plugin.html"><code>compound-engineering-plugin.md</code></a>, <a href="./gstack.html"><code>gstack.md</code></a>, <a href="./superpowers.html"><code>superpowers.md</code></a>, <a href="./ui-ux-pro-max-skill.html"><code>ui-ux-pro-max-skill.md</code></a>.</p>
+<hr />
+<h2 id="1-the-fundamental-truth-each-repo-believes">1. The fundamental truth each repo believes</h2>
+<p>Each of these is a bet on <em>what actually goes wrong</em> when an agent builds software. The rest of the repo is downstream of that bet.</p>
+<p><strong>superpowers — "The model will talk itself out of the process. Discipline is the product."</strong>
+Jesse Vincent's bet is that capability is not the bottleneck; rationalization is. A model that knows TDD will still write code first and call it pragmatism. So every discipline skill ships an "Excuse | Reality" table built from rationalizations <em>observed during adversarial pressure-testing</em>, and the Iron Laws are stated in ALL CAPS as non-negotiable: <code>"NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST"</code>, <code>"Write code before the test? Delete it. Start over."</code> The tell is <code>writing-skills/SKILL.md</code>, which treats skill text as tested code and documents an A/B finding that prohibitions backfire for shape-of-output problems. This is the only repo of the five doing empirical prompt engineering on its own artifacts.</p>
+<p><strong>agent-skills — "The industry already solved this. Encode it."</strong>
+Addy Osmani's bet is that the answer is not novel — it's Google's engineering practices, and the job is faithful transcription into a form an agent will follow. Hyrum's Law, the Beyoncé Rule, trunk-based development, Shift Left, Chesterton's Fence, ~100-line changes, five-axis code review. Twenty-four skills covering a full SDLC including the unglamorous parts nobody else has: <code>deprecation-and-migration</code>, <code>observability-and-instrumentation</code>, <code>documentation-and-adrs</code>. Belief in one line: <code>"Code without a spec is guessing."</code> It is the most <em>complete</em> curriculum and the least opinionated about orchestration.</p>
+<p><strong>compound-engineering-plugin — "Each unit of work must make the next one cheaper."</strong>
+Every's bet is that the value isn't in any single cycle — it's in the residue. <code>ce-compound</code> writes one learning per run to <code>docs/solutions/*.md</code> and updates <code>CONCEPTS.md</code>; every future <code>ce-brainstorm</code>, <code>ce-plan</code>, and <code>ce-code-review</code> is instructed to read that directory first. The compounding is literal file I/O — no embeddings, no memory API. Corollary belief, and the sharpest epistemics of the five: <code>"Two personas reasoned inside one context are two perspectives, not two witnesses."</code> Independence must be bought with process isolation, not costume changes. Stated split: 80% planning and review, 20% execution.</p>
+<p><strong>gstack — "AI made completeness cheap. Simulate the whole org and boil the ocean."</strong>
+Garry Tan's bet is that the shortcut is now the expensive option: <code>"When the complete implementation costs minutes more than the shortcut — do the complete thing. Every time."</code> So one solo builder gets a CEO reviewing scope, an eng manager locking architecture, a designer rating dimensions 0-10, a DX reviewer timing time-to-hello-world, a security officer running a 14-phase OWASP+STRIDE audit, and a QA that drives a real Chromium. Counterweighted by the only user-supremacy principle in the set: <code>"Two AI models agreeing on a change is a strong signal. It is not a mandate... the user is right. Always."</code> — coded into <code>autoplan</code> as a non-auto-decidable "User Challenge" class.</p>
+<p><strong>ui-ux-pro-max-skill — "The model has no taste and no eyes. Give it data and a browser."</strong>
+nextlevelbuilder's bet is that design failure is an <em>information</em> problem, not a prompting problem: <code>"Most AI design fails because the model never sees what it built and has no opinionated point of view."</code> Fix one half with 22 curated CSVs (88 styles, 192 product→palette mappings, 1,935 licensed fonts, 119 UX guidelines) served through a from-scratch BM25 search subprocess — never dumped into context. Fix the other half by opening the real page in Playwright at five viewport widths and auditing what is actually on screen. It is the only repo whose knowledge scales without its context cost scaling.</p>
+<hr />
+<h2 id="2-where-all-five-agree-the-consensus-stack">2. Where all five agree (the consensus stack)</h2>
+<p>Despite wildly different sizes, five independent authors converged on the same skeleton. Treat this as settled and don't re-litigate it in <code>sage-mode</code>:</p>
+<ol>
+<li><strong>A written artifact between intent and code.</strong> <code>SPEC.md</code> (agent-skills) / <code>docs/plans/*-plan.md</code> (CE) / <code>docs/superpowers/specs/*.md</code> (superpowers) / a design doc gated by <code>## GSTACK REVIEW REPORT</code> (gstack). Nobody lets the agent go from chat to implementation.</li>
+<li><strong>A hard human approval gate before code.</strong> Universal. superpowers is most explicit: <code>"the ceremony scales with the task; the approval gate never does."</code></li>
+<li><strong>Small, ordered, independently verifiable units of work.</strong> 2–5 minute tasks (superpowers), U-IDs (CE), <code>tasks/todo.md</code> with acceptance criteria (agent-skills).</li>
+<li><strong>Tests as the definition of done, written first.</strong> All four engineering repos. superpowers deletes untested code rather than back-filling.</li>
+<li><strong>Fresh-context adversarial review before merge.</strong> The single strongest consensus, and every repo independently discovered the same failure mode — a reviewer that sees your conclusion validates your conclusion. agent-skills strips the claim (<code>ARTIFACT + CONTRACT</code>, never <code>CLAIM</code>); CE requires separate execution contexts; gstack dispatches a scope-gated "review army" with fingerprinted findings; superpowers dispatches a per-task reviewer with a file-based <code>review-package</code>.</li>
+<li><strong>Severity taxonomies that map to a merge decision.</strong> Critical/Important/Suggestion, Blocker/High/Medium/Nitpick, GO/NO-GO. Not scores — decisions.</li>
+<li><strong>Anti-fabrication rules.</strong> <code>"Never fabricate metrics"</code> (agent-skills). <code>"never invent findings"</code> (ui-ux). <code>"If you cannot quote the motivating line(s), the finding is unverified — force its confidence to 4-5"</code> (gstack). <code>"NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE"</code> (superpowers).</li>
+<li><strong>Progressive disclosure of the prompt library.</strong> Skeleton <code>SKILL.md</code> + <code>references/</code> or <code>sections/</code> loaded on trigger. All five, in four different implementations.</li>
+</ol>
+<hr />
+<h2 id="3-where-they-genuinely-conflict">3. Where they genuinely conflict</h2>
+<p>These are the real forks in the road. <code>sage-mode</code> has to pick a side on each; it cannot inherit both.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Axis</th>
+<th>Pole A</th>
+<th>Pole B</th>
+<th>The stakes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Scope default</strong></td>
+<td>gstack: <em>Boil the Ocean</em> — completeness is cheap, do the whole thing</td>
+<td>agent-skills/superpowers: smallest viable change, ~100-line commits, <code>"if you build 1000 lines and 100 would suffice, you have failed"</code></td>
+<td>gstack's own <code>model-overlays/gpt-5.6-sol.md</code> contradicts its ETHOS (<code>"never as permission to widen it"</code>). Even gstack can't hold this line consistently.</td>
+</tr>
+<tr>
+<td><strong>Autonomy</strong></td>
+<td>gstack <code>/autoplan</code> auto-answers everything but taste; CE <code>lfg</code> runs hands-off with STOP gates</td>
+<td>superpowers: the approval gate never scales away</td>
+<td>Determines whether a "day" is 6 supervised hours or 2 hours of your attention plus unattended runs.</td>
+</tr>
+<tr>
+<td><strong>Enforcement</strong></td>
+<td>gstack: real <code>PreToolUse</code> hooks that hard-deny (<code>careful</code>/<code>freeze</code>/<code>guard</code>), a <code>Stop</code> verify-gate</td>
+<td>superpowers/CE/agent-skills: textual persuasion; agent-skills' two mechanical hooks ship <em>unwired</em></td>
+<td>Textual enforcement is a permanent arms race the repos themselves document losing. Mechanical enforcement is the only thing that actually holds.</td>
+</tr>
+<tr>
+<td><strong>Independence</strong></td>
+<td>CE: only separate execution contexts count as witnesses</td>
+<td>gstack: 23 "specialists" are personas written into prompt text; subagents are all generic <code>general-purpose</code> with inherited models</td>
+<td>CE is epistemically right. gstack is cheaper.</td>
+</tr>
+<tr>
+<td><strong>Knowledge form</strong></td>
+<td>ui-ux: CSV + BM25 subprocess, top-N rows returned</td>
+<td>everyone else: markdown prose loaded into context</td>
+<td>The only approach that survives a library growing past ~30 skills. gstack's <code>office-hours/SKILL.md</code> is ~1,740 lines <em>before</em> its six questions start; a tool exists (<code>gstack-context-bill</code>) solely to audit this.</td>
+</tr>
+<tr>
+<td><strong>Learning</strong></td>
+<td>CE: <code>ce-compound</code> writes a durable learning every cycle</td>
+<td>superpowers/agent-skills: none; skills are hand-tuned offline by maintainers</td>
+<td>Without this, you re-solve the same problem monthly. With it (unindexed), you accumulate 78 files nobody reads — CE needed <code>ce-compound-refresh</code> to manage the rot.</td>
+</tr>
+<tr>
+<td><strong>Front half</strong></td>
+<td>gstack <code>/office-hours</code>: demand reality, narrowest wedge, <code>"Interest is not demand"</code></td>
+<td>everyone else: assumes the feature is worth building</td>
+<td>Only gstack asks whether the thing should exist. For a solo builder choosing what to ship, that's not optional.</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="4-what-each-is-actually-best-at">4. What each is actually best at</h2>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Best in class</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stopping the agent from cheating</td>
+<td><strong>superpowers</strong></td>
+<td>Rationalization tables from observed pressure-test failures; Iron Laws; letter=spirit clause</td>
+</tr>
+<tr>
+<td>Breadth of engineering practice</td>
+<td><strong>agent-skills</strong></td>
+<td>24 skills incl. observability, deprecation, ADRs, CI/CD, API contracts</td>
+</tr>
+<tr>
+<td>Cross-session memory</td>
+<td><strong>compound-engineering</strong></td>
+<td><code>ce-compound</code> → <code>docs/solutions/</code> → required read for all planning skills</td>
+</tr>
+<tr>
+<td>Multi-perspective review</td>
+<td><strong>gstack</strong> + CE</td>
+<td>Scope-gated specialist army with fingerprint dedup + confidence gating; CE's risk-selected 16-persona roster</td>
+</tr>
+<tr>
+<td>Mechanical guardrails</td>
+<td><strong>gstack</strong></td>
+<td><code>PreToolUse</code> hard-deny hooks, directory freeze, content-addressed test evidence (<code>gstack-wtree</code>)</td>
+</tr>
+<tr>
+<td>Real runtime verification</td>
+<td><strong>gstack</strong> <code>/qa</code> + <strong>ui-ux</strong> <code>design-review</code></td>
+<td>Actual headless Chromium, real screenshots, real console errors</td>
+</tr>
+<tr>
+<td>Knowledge at scale without context cost</td>
+<td><strong>ui-ux-pro-max</strong></td>
+<td>BM25 subprocess over 22 CSVs; nothing loaded until queried</td>
+</tr>
+<tr>
+<td>Deciding what's worth building</td>
+<td><strong>gstack</strong> <code>/office-hours</code></td>
+<td>Six forcing questions; behavior-over-interest demand test</td>
+</tr>
+<tr>
+<td>Subagent orchestration hygiene</td>
+<td><strong>superpowers</strong></td>
+<td>File-based briefs, no-recursive-subagents contract, compaction-proof ledger</td>
+</tr>
+<tr>
+<td>Portability across harnesses</td>
+<td><strong>compound-engineering</strong></td>
+<td>11k-line converter to 8+ platforms (also its biggest irrelevance)</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="5-what-none-of-them-solve">5. What none of them solve</h2>
+<p>This is the wedge for <code>sage-mode</code>.</p>
+<ol>
+<li><strong>Nobody optimizes for wall-clock.</strong> Every repo optimizes for correctness or completeness; none has a time budget, a latency model, or a "this feature has 6 hours" mode. gstack targets 10–15 <em>parallel sprints</em>; superpowers targets long unattended runs; CE targets team compounding. Idea → shipped, solo, today is an unoccupied point in the design space.</li>
+<li><strong>Nobody routes intelligently.</strong> With 24–53 skills installed, <em>which</em> runs for this task is left to the model reading descriptions. agent-skills' TF-IDF eval (rank-1 ≥80%) is the only attempt, and it tests whether the right <em>name</em> gets picked, not whether the right <em>workflow</em> ran.</li>
+<li><strong>Enforcement is mostly theater.</strong> Four of five rely on the model choosing to comply. Only gstack blocks anything at the tool layer, and its verify-gate is opt-in per repo. Nothing in any repo blocks a commit with a failing suite.</li>
+<li><strong>The learning loop is write-only.</strong> CE is the only one that writes learnings, and it writes them to a flat directory with no index, no dedup, and no retrieval beyond "read the folder." That is a search problem with a known solution — one that ui-ux-pro-max already implemented for a different domain and CE never borrowed.</li>
+<li><strong>Cost is invisible.</strong> Zero token accounting, zero model-tier discipline that's actually wired. agent-skills documents Haiku/Sonnet/Opus assignments in prose and pins <code>model:</code> in none of its four persona files; gstack's subagents all inherit the parent model.</li>
+<li><strong>No repo proves it works.</strong> gstack's productivity claims are fed by its own telemetry. superpowers has evals only for skill text. Nobody benchmarks "features shipped per day" against a control.</li>
+</ol>
+<hr />
+<h2 id="6-implications-for-sage-mode">6. Implications for sage-mode</h2>
+<p>Five positions worth arguing about, drawn from the comparison above:</p>
+<ul>
+<li><strong>Steal the consensus stack wholesale</strong> (§2). It's free and it's settled. The differentiation is not there.</li>
+<li><strong>Side with superpowers on discipline, gstack on enforcement.</strong> Rationalization tables <em>plus</em> real <code>PreToolUse</code>/<code>Stop</code> hooks. Textual rules are the spec; hooks are the compiler.</li>
+<li><strong>Side with agent-skills/superpowers on scope, against gstack.</strong> "Boil the ocean" is directly incompatible with shipping in a day, and gstack's own model overlay quietly walks it back.</li>
+<li><strong>Steal ui-ux's architecture, not its content.</strong> A BM25/ripgrep-searchable index over skills <em>and</em> accumulated learnings solves both the routing problem (§5.2) and the retrieval half of the learning problem (§5.4) with one mechanism. This is the single highest-leverage idea in all five repos and nobody applied it to skills themselves.</li>
+<li><strong>Steal CE's compounding, fix its retrieval.</strong> <code>ce-compound</code>'s instinct is right; its flat unindexed folder is the bug.</li>
+<li><strong>Keep gstack's <code>/office-hours</code> front half, drop its org simulation.</strong> Six forcing questions cost minutes and prevent shipping the wrong thing. Four persona plan reviews cost hours.</li>
+<li><strong>Add the thing none of them have: a time budget.</strong> A <code>sage-mode</code> run should know how long it has, and pick its ceremony tier from that — not from task classification alone.</li>
+</ul>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#1-the-fundamental-truth-each-repo-believes">1. The fundamental truth each repo believes</a><a href="#2-where-all-five-agree-the-consensus-stack">2. Where all five agree (the consensus stack)</a><a href="#3-where-they-genuinely-conflict">3. Where they genuinely conflict</a><a href="#4-what-each-is-actually-best-at">4. What each is actually best at</a><a href="#5-what-none-of-them-solve">5. What none of them solve</a><a href="#6-implications-for-sage-mode">6. Implications for sage-mode</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "sage-mode",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sage-mode CLI and Cursor plugin runtime",
+  "license": "MIT",
+  "bin": {
+    "sage": "./lib/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --test-reporter spec test/*.test.js lib/**/*.test.js",
+    "lint": "node lib/cli.js lint"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "typescript": "^5.9.2"
+  }
+}

@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { render } from "../lib/notebook/index.js";
+test("notebook fixture renders callout, table wrap, mermaid, and md links", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-nb-"));
+    const src = fileURLToPath(new URL("../lib/notebook/__fixtures__/spec.md", import.meta.url));
+    const dest = join(dir, "spec.md");
+    mkdirSync(join(dir, "assets"), { recursive: true });
+    copyFileSync(src, dest);
+    const htmlPath = render(dest);
+    const html = readFileSync(htmlPath, "utf8");
+    assert.match(html, /Fixture spec/);
+    assert.match(html, /class="tw"/);
+    assert.match(html, /class="mermaid"/);
+    assert.match(html, /plan\.html/);
+    assert.doesNotMatch(html, /https?:\/\/cdn/);
+});
+void dirname;

@@ -1,0 +1,73 @@
+#!/usr/bin/env sh
+# sage-lane — preToolUse Write|Delete. Deny-tier, failClosed.
+set -eu
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+LANE="$ROOT/.sage/lane"
+PAY=$(mktemp "${TMPDIR:-/tmp}/sage-lane.XXXXXX")
+trap 'rm -f "$PAY"' EXIT
+cat > "$PAY"
+python3 - "$ROOT" "$LANE" "$PAY" <<'PY'
+import json, os, sys, fnmatch
+
+root, lane_path, pay = sys.argv[1], sys.argv[2], sys.argv[3]
+raw = open(pay, "rb").read()
+if raw.startswith(b"\xef\xbb\xbf"):
+    raw = raw[3:]
+
+def deny(msg: str) -> None:
+    print(json.dumps({"permission": "deny", "agent_message": msg}))
+    sys.exit(0)
+
+if not os.path.isfile(lane_path):
+    print("{}")
+    sys.exit(0)
+
+if not raw.strip():
+    deny("[lane] Could not parse the tool payload. Blocked (fail closed).")
+
+try:
+    payload = json.loads(raw.decode("utf-8"))
+except Exception:
+    deny("[lane] Could not parse the tool payload. Blocked (fail closed).")
+
+ti = payload.get("tool_input") or {}
+path = None
+if isinstance(ti, dict):
+    for k in ("path", "file_path", "filePath", "target_file", "file"):
+        if ti.get(k):
+            path = ti[k]
+            break
+if not path:
+    path = payload.get("file_path")
+if not path:
+    deny("[lane] Write payload has no file path. Blocked (fail closed). Request a lane amendment rather than retry.")
+
+abs_path = path if os.path.isabs(path) else os.path.join(root, path)
+target = os.path.realpath(abs_path)
+try:
+    data = json.loads(open(lane_path).read())
+    owns = data.get("owns") or []
+except Exception:
+    owns = []
+
+rel = os.path.relpath(target, os.path.realpath(root))
+if rel.startswith(".."):
+    deny(f"[lane] {rel} is outside owns {owns}. Request a lane amendment rather than retry.")
+
+def matches(rel: str, g: str) -> bool:
+    g = g.lstrip("./").replace("\\", "/")
+    rel = rel.replace("\\", "/")
+    if g.endswith("/**"):
+        prefix = g[:-3].rstrip("/")
+        return rel == prefix or rel.startswith(prefix + "/")
+    if g.endswith("/*"):
+        prefix = g[:-2].rstrip("/")
+        rest = rel[len(prefix)+1:] if rel.startswith(prefix + "/") else None
+        return rest is not None and "/" not in rest
+    return fnmatch.fnmatch(rel, g) or rel == g
+
+if any(matches(rel, g) for g in owns):
+    print("{}")
+else:
+    deny(f"[lane] {rel} is outside owns {owns}. Request a lane amendment rather than retry.")
+PY

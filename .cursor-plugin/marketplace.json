@@ -1,0 +1,28 @@
+{
+  "name": "sage-mode",
+  "owner": {
+    "name": "rcwolf97",
+    "url": "https://github.com/rcwolf97"
+  },
+  "metadata": {
+    "description": "Sprint-shaped engineering org for Cursor: shape, plan, build, review, verify, ship.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "sage-mode",
+      "source": "plugin",
+      "description": "An engineering organization you command. Sprint-shaped delivery with specialist agents, adversarial review, and a notebook that remembers.",
+      "version": "1.0.0",
+      "author": { "name": "rcwolf97" },
+      "license": "MIT",
+      "keywords": [
+        "engineering",
+        "sprint",
+        "review",
+        "agents",
+        "notebook"
+      ]
+    }
+  ]
+}

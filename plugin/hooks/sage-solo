@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# sage-solo — subagentStart. Deny-tier, failClosed. Reviewers cannot spawn children.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+. "$DIR/json-safe.sh"
+json_read
+if [ -z "${JSON_IN:-}" ] || ! json_valid; then
+  python3 -c 'import json; print(json.dumps({"permission":"deny","agent_message":"[solo] Could not parse payload. Blocked (fail closed)."}))' 2>/dev/null || printf '%s\n' '{"permission":"deny"}'
+  exit 0
+fi
+TYPE=$(json_get subagent_type)
+# parent role is stashed by sage-build in .sage/parent-role when dispatching
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+PARENT=""
+[ -f "$ROOT/.sage/parent-role" ] && PARENT=$(cat "$ROOT/.sage/parent-role")
+python3 - "$TYPE" "$PARENT" <<'PY'
+import json, sys
+typ, parent = sys.argv[1], sys.argv[2]
+no_children = {"reviewer", "red-team", "design-critic"}
+if parent in no_children:
+    print(json.dumps({"permission":"deny","agent_message":"[solo] Review is terminal — this role cannot spawn subagents."}))
+else:
+    print("{}")
+PY
+exit 0

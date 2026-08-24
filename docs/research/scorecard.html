@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scorecard · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>Scorecard</h1>
+    <div class="sub">sage-mode against the five, on twelve dimensions — with the maturity caveat kept separate</div>
+  </div>
+  <p><strong>Date:</strong> 2026-08-21 · Scores are judgements, not measurements. The method and every caveat are below.</p>
+<blockquote>
+<p><strong>In plain terms:</strong> Twelve dimensions, six systems, one to ten. Five of these systems are real software people use every day. The sixth is a document I wrote this week. That asymmetry is the most important thing on this page, so maturity is scored separately and never folded into the total — and the honest reading of the result is at the bottom, under "where sage-mode loses."</p>
+</blockquote>
+<hr />
+<h2 id="1-how-to-read-this">1. How to read this</h2>
+<p>Three rules I held myself to:</p>
+<ol>
+<li><strong>sage-mode is scored as designed, not as built.</strong> Every other score reflects code you can run today. sage-mode's reflects intent. A design document always outscores shipped software, because a design document has never met a user.</li>
+<li><strong>Maturity is a separate row.</strong> It is not averaged in, because averaging it in would let a 9 on "cost control" cancel a 1 on "does it exist." sage-mode scores <strong>1</strong>. superpowers scores <strong>9</strong>.</li>
+<li><strong>The weights are mine and they're arguable.</strong> Context economy and cost control are weighted 1.1 because they decide whether a system is usable daily. Time-to-first-value is weighted 0.8 because a tool you use for a year can afford a slow start. Reweight and the ranking moves — that's the point of showing them.</li>
+</ol>
+<p>Scores draw on the <a href="./overview.html">five teardowns</a>, the <a href="./gstack-coding-mechanics.html">gstack implementation deep-dive</a>, and measurement where measurement was possible (line counts, file counts, <code>find</code> output).</p>
+<hr />
+<h2 id="2-the-rubric">2. The rubric</h2>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>A 10 looks like</th>
+<th>A 3 looks like</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Intake &amp; planning</strong></td>
+<td>Interrogates you one question at a time until the problem is genuinely pinned, and challenges the premise</td>
+<td>Takes your prompt at face value and starts planning</td>
+</tr>
+<tr>
+<td><strong>Implementation orchestration</strong></td>
+<td>File-based briefs, compaction-proof ledger, worktrees, joins, bounded fix loops</td>
+<td>One agent, one long turn, hope</td>
+</tr>
+<tr>
+<td><strong>Review rigour</strong></td>
+<td>Independent context, scoped specialists, structured findings, false positives mechanically suppressed</td>
+<td>"Looks good to me" from the model that wrote it</td>
+</tr>
+<tr>
+<td><strong>Runtime verification</strong></td>
+<td>Real browser, real suite, evidence bound to content so it can't go stale</td>
+<td>The agent says the tests passed</td>
+</tr>
+<tr>
+<td><strong>Mechanical enforcement</strong></td>
+<td>Hooks that deny the tool call, fail-closed</td>
+<td>Instructions in a prompt</td>
+</tr>
+<tr>
+<td><strong>Memory / compounding</strong></td>
+<td>Learnings written, indexed, deduped, and actually read by later work</td>
+<td>Nothing survives the session</td>
+</tr>
+<tr>
+<td><strong>Context economy</strong></td>
+<td>Retrieval, skeleton skills, nothing loaded speculatively</td>
+<td>Everything in the prompt, every time</td>
+</tr>
+<tr>
+<td><strong>Cost control</strong></td>
+<td>Model tier pinned per role, wired and verifiable</td>
+<td>Documented in prose, pinned nowhere</td>
+</tr>
+<tr>
+<td><strong>Parallel throughput</strong></td>
+<td>Many independent lanes, isolated, safely merged</td>
+<td>Strictly serial</td>
+</tr>
+<tr>
+<td><strong>Design / frontend depth</strong></td>
+<td>Produces UI you'd ship, and can see what it built</td>
+<td>No opinion, no eyes</td>
+</tr>
+<tr>
+<td><strong>Lifecycle breadth</strong></td>
+<td>Observability, migrations, security, ADRs, deprecation, release</td>
+<td>Code and tests only</td>
+</tr>
+<tr>
+<td><strong>Time to first value</strong></td>
+<td>Install and go</td>
+<td>Hours of setup and a private dependency</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="3-the-matrix">3. The matrix</h2>
+<div class="tw smx"><div class="tw"><table>
+<thead><tr><th class="dim">Dimension</th><th>agent-skills</th><th>compound-eng</th><th>gstack</th><th>superpowers</th><th>ui-ux-pro-max</th><th>sage-mode*</th></tr></thead><tbody>
+<tr><td class="dim"><b>Intake &amp; planning quality</b><span class="note">Does it interrogate you properly before anything gets built?</span><span class="wt">weight 1.2</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Implementation orchestration</b><span class="note">Dispatch, briefs, ledgers, worktrees — the machinery of many agents building.</span><span class="wt">weight 1.2</span></td><td class="sc"><span class="bw"><span class="b" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Review rigour</b><span class="note">Adversarial independence, finding schemas, false-positive suppression.</span><span class="wt">weight 1.2</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:100%"></span></span><span class="sv">10</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Runtime verification</b><span class="note">Real evidence — browsers, suites, content-bound freshness — not self-report.</span><span class="wt">weight 1.0</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:40%"></span></span><span class="sv">4</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Mechanical enforcement</b><span class="note">Hooks that actually deny, versus instructions the model may ignore.</span><span class="wt">weight 1.0</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b" style="width:20%"></span></span><span class="sv">2</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:40%"></span></span><span class="sv">4</span></td><td class="sc"><span class="bw"><span class="b" style="width:20%"></span></span><span class="sv">2</span></td><td class="sc"><span class="bw"><span class="b design" style="width:80%"></span></span><span class="sv">8</span></td></tr>
+<tr><td class="dim"><b>Memory / compounding</b><span class="note">Does last month's work make this month cheaper?</span><span class="wt">weight 1.0</span></td><td class="sc"><span class="bw"><span class="b" style="width:10%"></span></span><span class="sv">1</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b" style="width:10%"></span></span><span class="sv">1</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Context economy</b><span class="note">Tokens burned before any work happens.</span><span class="wt">weight 1.1</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b" style="width:20%"></span></span><span class="sv">2</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:100%"></span></span><span class="sv">10</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Cost control</b><span class="note">Model tiering that is actually wired, not documented.</span><span class="wt">weight 1.1</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b" style="width:20%"></span></span><span class="sv">2</span></td><td class="sc"><span class="bw"><span class="b" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b design" style="width:100%"></span></span><span class="sv">10</span></td></tr>
+<tr><td class="dim"><b>Parallel throughput</b><span class="note">Independent work in flight at once.</span><span class="wt">weight 0.9</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:40%"></span></span><span class="sv">4</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Design / frontend depth</b><span class="note">Can it produce UI you would ship?</span><span class="wt">weight 0.9</span></td><td class="sc"><span class="bw"><span class="b" style="width:50%"></span></span><span class="sv">5</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:10%"></span></span><span class="sv">1</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b design" style="width:90%"></span></span><span class="sv">9</span></td></tr>
+<tr><td class="dim"><b>Lifecycle breadth</b><span class="note">Observability, migrations, security, ADRs, deprecation, release.</span><span class="wt">weight 0.8</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:100%"></span></span><span class="sv">10</span></td><td class="sc"><span class="bw"><span class="b" style="width:40%"></span></span><span class="sv">4</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b design" style="width:80%"></span></span><span class="sv">8</span></td></tr>
+<tr><td class="dim"><b>Time to first value</b><span class="note">Install to useful output.</span><span class="wt">weight 0.8</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b" style="width:20%"></span></span><span class="sv">2</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b design" style="width:40%"></span></span><span class="sv">4</span></td></tr>
+</tbody><tfoot>
+<tr class="tot"><td class="dim"><b>Weighted capability</b><span class="note">% of the maximum score across the twelve dimensions</span></td><td class="sc"><span class="bw"><span class="b" style="width:53%"></span></span><span class="sv">53%</span></td><td class="sc"><span class="bw"><span class="b" style="width:56%"></span></span><span class="sv">56%</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">70%</span></td><td class="sc"><span class="bw"><span class="b" style="width:59%"></span></span><span class="sv">59%</span></td><td class="sc"><span class="bw"><span class="b" style="width:60%"></span></span><span class="sv">60%</span></td><td class="sc"><span class="bw"><span class="b design" style="width:86%"></span></span><span class="sv">86%</span></td></tr>
+<tr class="mat"><td class="dim"><b>Maturity — proven in use</b><span class="note">Scored separately and never averaged in. sage-mode is a document.</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:10%"></span></span><span class="sv">1</span></td></tr>
+</tfoot></table></div></div>
+
+<p class="cap">Bars encode the score out of ten; length, not colour, carries the value. The darker bar marks sage-mode for reference, and the grey bar in the last row marks maturity — both are emphasis, not a separate quantity. The numbers are the table view.</p>
+
+<hr />
+<h2 id="4-where-each-one-genuinely-wins">4. Where each one genuinely wins</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Every one of these is best in the world at something. Here is what each would be irresponsible to ignore.</p>
+</blockquote>
+<p><strong>gstack — 70%, the highest of anything that actually exists.</strong> It wins review, enforcement, runtime verification, and breadth, and it isn't close. The pre-emit verification gate (quote the motivating line or your confidence caps at 4-5), the content-addressed working-tree fingerprint that keeps "tests passed" valid across a rebase but not across a real edit, tiered hook polarity where ask-tier fails open and deny-tier fails closed — nothing else in the set has any of it. What drags it down is measurable: 62% of its entire skill corpus is duplicated preamble, and its subagents pin no model at all.</p>
+<p><strong>superpowers — best implementation orchestration and best time-to-value.</strong> Fourteen skills, zero dependencies, one hook. <code>subagent-driven-development</code> is the most carefully thought-out multi-agent build loop in the set: fresh implementer per task, two-stage review, five-round fix loop with model escalation, and a ledger that survives compaction because the maintainers watched controllers re-dispatch entire completed task sequences. It also has the best textual enforcement in existence — rationalization tables built from observed pressure-test failures — while being honest that textual enforcement is a losing arms race.</p>
+<p><strong>ui-ux-pro-max — best context economy in the set, by a distance.</strong> Twenty-two CSVs, a from-scratch BM25 engine, and a subprocess that returns three to ten rows. Its knowledge grows without its context cost growing. Everyone else's prompt library gets heavier as it gets smarter; this one doesn't. That architecture, applied to something other than design data, is the single most transferable idea across all five.</p>
+<p><strong>Compound Engineering — best memory.</strong> <code>ce-compound</code> writes one learning per cycle and every later planning skill is instructed to read the folder. The retrieval is weak and the folder rots, but it's the only system in the set where last month's work is supposed to make this month cheaper — and the epistemics are the sharpest of the five: <em>"Two personas reasoned inside one context are two perspectives, not two witnesses."</em></p>
+<p><strong>agent-skills — best curriculum.</strong> Twenty-four skills including the unglamorous ones nobody else bothers with: observability and instrumentation, deprecation and migration, ADRs, CI/CD, API contract design. If you want a checklist of what a senior engineer is supposed to think about, this is the most complete one here, and it installs in a minute.</p>
+<hr />
+<h2 id="5-where-sage-mode-is-actually-differentiated">5. Where sage-mode is actually differentiated</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Most of sage-mode is assembly — taking the best mechanism from each and putting it in one place. That's worth doing but it isn't novel. Three things are genuinely new.</p>
+</blockquote>
+<p><strong>Cost architecture (10, and the next best is 8).</strong> Nobody else routes work across an included lane, a flat-rate subscription lane, and a metered lane on the principle that metered tokens buy judgment and never production. gstack scores 2 here — a single <code>/review</code> was measured at 15M tokens. agent-skills documents Haiku/Sonnet/Opus tiering in prose and pins <code>model:</code> in none of its four persona files. Cursor has shipped per-subagent model selection with effort and context parameters, and not one of the five uses it.</p>
+<p><strong>The notebook as both the human artifact and the retrieval layer.</strong> Compound Engineering writes learnings for machines; nobody writes them for you. A <code>docs/</code> site you browse <em>is</em> the corpus the agents search. That's one mechanism serving two jobs, and it's the reason the memory score is a 9 rather than an 8.</p>
+<p><strong>Assembly across the seams.</strong> Individually these are borrowed. Together they interlock in ways none of the sources managed: gstack's content-addressed evidence ledger feeding superpowers' compaction-proof build ledger; ui-ux-pro-max's retrieval architecture applied to the skill catalog so lifecycle breadth costs nothing until used; Compound Engineering's cross-vendor independence requirement satisfied by a Cursor frontmatter field rather than an external CLI.</p>
+<hr />
+<h2 id="6-where-sage-mode-loses">6. Where sage-mode loses</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> The parts of this page that should worry you.</p>
+</blockquote>
+<p><strong>Maturity: 1.</strong> Zero lines of code. superpowers has a documented 94% PR rejection rate and runs evals on its own skill text. gstack has telemetry from real daily use. Every sage-mode score is a claim about software that does not exist, and the history of this kind of document is that the assembly is harder than the parts.</p>
+<p><strong>Time to first value: 4</strong> — third from last, ahead only of gstack and Compound Engineering. Eight commands, an org chart, three cost lanes, a notebook renderer, an evidence ledger, and four hooks is a lot of surface before the first useful output. superpowers gets to value in one hook and fourteen files. If sage-mode is not usable at the end of phase 1, the design is wrong.</p>
+<p><strong>Mechanical enforcement: 8, not gstack's 9</strong> — and that gap is a platform limit, not a design choice. Cursor's <code>stop</code> hook cannot block; documented, plainly: <em>"Can block: No."</em> The verification gate is a nag loop capped at five iterations rather than a wall. Cursor's <code>beforeReadFile</code> cannot rewrite content, so the trick of making code invisible to the model doesn't port either.</p>
+<p><strong>Two scores rest on unverified assumptions.</strong> Cost control (10) assumes plugin-shipped subagents honor their <code>model</code> frontmatter — documented for <code>.cursor/agents/</code>, never stated for plugins. Parallel throughput (9) assumes <code>preToolUse</code>'s <code>tool_input</code> carries <code>file_path</code> for Write, which Cursor's docs never show. <strong>If the second assumption is wrong, lane enforcement isn't buildable and parallel throughput drops to about a 5.</strong> Both are an hour of testing.</p>
+<p><strong>And the design score is a promise.</strong> A 9 on design depth is contingent on the <a href="../design/design-org.html">design org</a> working — which is a harder problem than any of the engineering ones here, because it's a taste problem wearing a systems costume.</p>
+<hr />
+<h2 id="7-what-would-falsify-this">7. What would falsify this</h2>
+<p>Three cheap experiments, in order of how much they'd change the picture:</p>
+<ol>
+<li><strong>Build phase 1 and time it.</strong> If the interrogation-to-roadmap loop isn't useful in an afternoon, time-to-value is worse than 4 and the phasing is wrong.</li>
+<li><strong>A/B the cheap reviewer.</strong> Same diff, <code>gemini-3.7-flash</code> versus a frontier model, count confirmed findings. If Flash finds materially fewer real bugs, the cost architecture's headline number is fiction and Lane C has to move upmarket.</li>
+<li><strong>Run one real sprint with four parallel lanes.</strong> Cursor's own research names split-brain duplication, planner contention, merge conflicts, megafiles, and ossification. The <code>owns</code>-glob constraint is supposed to prevent the first three at planning time. Either it does or it doesn't, and one sprint answers it.</li>
+</ol>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#1-how-to-read-this">1. How to read this</a><a href="#2-the-rubric">2. The rubric</a><a href="#3-the-matrix">3. The matrix</a><a href="#4-where-each-one-genuinely-wins">4. Where each one genuinely wins</a><a href="#5-where-sage-mode-is-actually-differentiated">5. Where sage-mode is actually differentiated</a><a href="#6-where-sage-mode-loses">6. Where sage-mode loses</a><a href="#7-what-would-falsify-this">7. What would falsify this</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

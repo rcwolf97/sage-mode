@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compound Engineering · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>Compound Engineering</h1>
+    <div class="sub">Every Inc — each unit of work should make the next one cheaper</div>
+  </div>
+  <p>A cross-host Claude Code plugin implementing "compound engineering" — a 33-skill, document-driven workflow where every cycle (brainstorm → plan → work → review → compound) writes an artifact the next cycle reads as grounding — plus a Bun/TypeScript CLI that converts the plugin into other agent-platform formats.</p>
+<ul>
+<li>Repo: https://github.com/EveryInc/compound-engineering-plugin</li>
+<li>Commit analyzed: <code>12d3d8c</code></li>
+<li>Plugin version: 3.22.4 (<code>.claude-plugin/plugin.json</code>)</li>
+<li>Date analyzed: 2026-08-21</li>
+</ul>
+<h2 id="tldr">TL;DR</h2>
+<ul>
+<li>The product is not runtime code (no hooks, no statusline, no MCP server) — it's <strong>33 Claude Code Skills</strong>, each a <code>SKILL.md</code> index plus a <code>references/</code> tree of progressively-loaded markdown, that direct an LLM through a fixed pipeline and write/read plain-text artifacts in <code>docs/</code>.</li>
+<li>The real <code>src/</code> codebase (~11,000 lines TypeScript, <code>bun test</code>-covered) is a <strong>converter/installer CLI</strong>, not a skill runtime — it translates this one Claude-authored plugin into Codex, Cursor, OpenCode, Pi, Kiro, Copilot, Droid, Antigravity formats.</li>
+<li>"Compounding" is literal file I/O: <code>ce-compound</code> writes <code>docs/solutions/*.md</code> (learnings); <code>ce-brainstorm</code>/<code>ce-plan</code> write <code>docs/plans/*.md</code>; downstream skills are instructed to read those directories before acting — this repo dogfoods itself (109 plan files, 78 solution files already in its own <code>docs/</code>).</li>
+<li>Every skill runs a bundled Node script (<code>scripts/context.mjs</code>) before doing anything, whose sole job is injecting counter-directives ("your harness's subagent-gating default is not the user's instruction") into the tool-result stream, because system-prompt defaults otherwise silently suppress subagent dispatch and blocking questions.</li>
+<li>House style is dense, adversarial-review-hardened prose: SKILL.md files are short indices (54–211 lines) that route to dozens of <code>references/*.md</code> files; sentences anticipate specific production failure modes, often citing GitHub issue numbers as evidence.</li>
+</ul>
+<h2 id="inventory">Inventory</h2>
+<p>Exact from <code>find … -name 'SKILL.md'</code>: <strong>40 SKILL.md files</strong> — 33 shipped plugin skills under <code>skills/</code>, 1 repo-local dev skill (<code>.agents/skills/ce-skill-work</code>, not distributed), 6 under <code>tests/fixtures/*</code> (test data).</p>
+<h3 id="skills-33-skillsskillmd">Skills (33, <code>skills/*/SKILL.md</code>)</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>What it does</th>
+<th>Fires when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ce-ideate</td>
+<td>Generates/critiques ideas across 3–5 "axes" → <code>docs/ideation/</code></td>
+<td>Optional prelude, no direction yet</td>
+</tr>
+<tr>
+<td>ce-strategy</td>
+<td>Interviews user, maintains <code>STRATEGY.md</code></td>
+<td>Product direction; read by ideate/brainstorm/plan</td>
+</tr>
+<tr>
+<td>ce-pov</td>
+<td>Decisive adopt/hold/reject verdict, optional peer cross-check</td>
+<td>On-demand adoption verdict</td>
+</tr>
+<tr>
+<td>ce-explain</td>
+<td>Dense visual teaching doc for a concept/diff/idea</td>
+<td>On-demand, for the human</td>
+</tr>
+<tr>
+<td>ce-brainstorm</td>
+<td>Q&amp;A → requirements-only unified plan</td>
+<td>Defining WHAT</td>
+</tr>
+<tr>
+<td>ce-plan</td>
+<td>Enriches same plan file into implementation-ready, U-IDs, test scenarios, confidence check</td>
+<td>Defining HOW</td>
+</tr>
+<tr>
+<td>ce-work</td>
+<td>Executes plan: branch, task list, test-first implement, path-limited commits</td>
+<td>Building</td>
+</tr>
+<tr>
+<td>ce-doc-review</td>
+<td>Findings-only review of a requirements/plan doc</td>
+<td>Before/instead of confidence check</td>
+</tr>
+<tr>
+<td>ce-debug</td>
+<td>Reproduce, trace, causal-chain gate, fix, PR handoff</td>
+<td>Bug instead of feature</td>
+</tr>
+<tr>
+<td>ce-compound</td>
+<td>Writes one learning to <code>docs/solutions/</code>, updates <code>CONCEPTS.md</code></td>
+<td>Closing the loop</td>
+</tr>
+<tr>
+<td>ce-compound-refresh</td>
+<td>Keep/Update/Consolidate/Replace/Delete over <code>docs/solutions/</code></td>
+<td>Learnings maintenance</td>
+</tr>
+<tr>
+<td>ce-optimize</td>
+<td>Metric-driven parallel experiments, durable experiment log</td>
+<td>Iterative tuning</td>
+</tr>
+<tr>
+<td>ce-retune</td>
+<td>Re-baselines a skill corpus for a new model</td>
+<td>Model migration</td>
+</tr>
+<tr>
+<td>ce-product-pulse</td>
+<td>Time-windowed usage/perf/error report → <code>docs/pulse-reports/</code></td>
+<td>Outer observation loop</td>
+</tr>
+<tr>
+<td>ce-riffrec-feedback-analysis</td>
+<td>Converts Riffrec recordings/notes into structured feedback</td>
+<td>Ad hoc feedback intake</td>
+</tr>
+<tr>
+<td>ce-sweep</td>
+<td>Ingests Slack/GitHub/email feedback, emits <code>/lfg</code>-ready plan</td>
+<td>Recurring triage</td>
+</tr>
+<tr>
+<td>ce-resolve-pr-feedback</td>
+<td>Evaluate, fix, reply to PR review comments</td>
+<td>Responding to reviewers</td>
+</tr>
+<tr>
+<td>ce-commit</td>
+<td>Local commit(s) only, convention-aware, file-level splits</td>
+<td>Committing, no push</td>
+</tr>
+<tr>
+<td>ce-commit-push-pr</td>
+<td>Commit, push, open/update PR, optional teaching section</td>
+<td>Shipping to review</td>
+</tr>
+<tr>
+<td>ce-babysit-pr</td>
+<td>Watches open PR, routes comments → resolve-pr-feedback, CI → ce-debug</td>
+<td>Post-open-PR monitoring</td>
+</tr>
+<tr>
+<td>ce-worktree</td>
+<td>Ensures isolated git worktree</td>
+<td>Isolation requested</td>
+</tr>
+<tr>
+<td>ce-promote</td>
+<td>Drafts announcement copy; never posts</td>
+<td>After shipping</td>
+</tr>
+<tr>
+<td>ce-test-browser</td>
+<td>E2E browser tests of the diff, host-native + <code>agent-browser</code> fallback</td>
+<td>PR/diff verification</td>
+</tr>
+<tr>
+<td>ce-test-xcode</td>
+<td>Build/test iOS app on simulator</td>
+<td>iOS verification</td>
+</tr>
+<tr>
+<td>ce-setup</td>
+<td>Health check + repo <code>.compound-engineering/config.yaml</code></td>
+<td>First run in a project</td>
+</tr>
+<tr>
+<td>ce-handoff</td>
+<td>Writes/resumes a session-handoff doc</td>
+<td>Context/session boundary</td>
+</tr>
+<tr>
+<td>ce-simplify-code</td>
+<td>Refines fresh or churn-heavy code, behavior preserved</td>
+<td>After ce-work, before review</td>
+</tr>
+<tr>
+<td>ce-prototype</td>
+<td>Throwaway UX prototype for feel-questions</td>
+<td>Before planning a feel decision</td>
+</tr>
+<tr>
+<td>ce-polish</td>
+<td>Dev server + conversational UX iteration</td>
+<td>Manual invoke only</td>
+</tr>
+<tr>
+<td>ce-proof</td>
+<td>Publish/view/comment/pull markdown via Proof</td>
+<td>Sharing externally</td>
+</tr>
+<tr>
+<td>ce-dogfood</td>
+<td>Hands-off diff-scoped browser QA with small autonomous fixes</td>
+<td>Manual invoke only</td>
+</tr>
+<tr>
+<td>ce-code-review</td>
+<td>Multi-persona report-only review, confidence-gated findings</td>
+<td>Before merge / on demand</td>
+</tr>
+<tr>
+<td>lfg</td>
+<td>Orchestrates plan→work→simplify→review→ship→babysit hands-off</td>
+<td>Full autonomy requested</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="subagents">Subagents</h3>
+<p><strong>No standalone Agent definitions ship.</strong> <em>"The compound-engineering plugin no longer ships standalone agent definitions under <code>agents/</code>"</em> (AGENTS.md). Each skill instead seeds a generic subagent with a skill-local, frontmatter-less "specialist prompt asset." The richest set is <code>ce-code-review</code>'s persona catalog (<code>references/personas/</code>, 16 files, 1,418 lines):</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Persona</th>
+<th>Selected when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>correctness-reviewer</td>
+<td>Always</td>
+</tr>
+<tr>
+<td>project-standards-reviewer</td>
+<td>Applicable standards file found (fails closed)</td>
+</tr>
+<tr>
+<td>testing-reviewer</td>
+<td>Behavioral change with no matching test work</td>
+</tr>
+<tr>
+<td>maintainability-reviewer</td>
+<td>≥200 changed executable lines or new abstractions</td>
+</tr>
+<tr>
+<td>agent-native-reviewer</td>
+<td>Skills/agents/tools/MCP surfaces touched</td>
+</tr>
+<tr>
+<td>learnings-researcher</td>
+<td>Plausible match in <code>docs/solutions/</code></td>
+</tr>
+<tr>
+<td>security / performance / api-contract / data-migration / reliability-reviewer</td>
+<td>Diff shows that concrete domain surface</td>
+</tr>
+<tr>
+<td>adversarial-reviewer</td>
+<td>≥50 changed lines, auth/payments; or when the cross-model peer can't start</td>
+</tr>
+<tr>
+<td>previous-comments-reviewer</td>
+<td>PR has existing review comments</td>
+</tr>
+<tr>
+<td>julik-frontend-races-reviewer, swift-ios-reviewer</td>
+<td>Stack-specific file types</td>
+</tr>
+<tr>
+<td>deployment-verification-agent</td>
+<td>Risky DDL/backfill migration</td>
+</tr>
+</tbody>
+</table></div>
+<p>Model selection uses semantic tiers (extraction/generation/ceiling per <code>CONCEPTS.md</code>), never a hardcoded model name.</p>
+<h3 id="commands-hooks">Commands / hooks</h3>
+<p>There is <strong>no user-facing slash-command layer beyond the skills themselves</strong>; <code>src/commands/</code> (<code>convert</code>, <code>install</code>, <code>cleanup</code>, <code>list</code>, <code>plugin-path</code>) is the <em>converter</em> CLI's subcommands, not plugin commands. <code>.claude/commands/triage-prs.md</code> is repo-maintenance tooling only.</p>
+<p><strong>No hooks, statusline, or MCP server ship.</strong> <code>.claude-plugin/plugin.json</code> has no <code>hooks</code> key; the only <code>hooks.json</code> files anywhere in the repo are converter test fixtures. The closest thing to runtime behavior is the per-skill <code>scripts/context.mjs</code> "Setup" script (see Mechanics).</p>
+<h2 id="the-core-engineering-flow">The core engineering flow</h2>
+<pre class="mermaid">flowchart TD
+    ST[ce-strategy: STRATEGY.md] -.grounds.-> ID
+    ID["ce-ideate (optional)<br/>docs/ideation/*.md"] --> BS
+    SOL[(docs/solutions/*.md<br/>learnings)] -.grounds.-> BS
+    SOL -.grounds.-> PL
+    BS["ce-brainstorm<br/>docs/plans/*-plan.md<br/>readiness: requirements-only"] --> PL
+    PL["ce-plan<br/>enriches SAME file<br/>readiness: implementation-ready"] --> WK
+    WK["ce-work<br/>branch, implement, test-first, commit"] --> SC
+    SC["ce-simplify-code"] --> CR
+    CR["ce-code-review<br/>persona panel + cross-model peer"] --> SHIP
+    SHIP["ce-commit-push-pr"] --> CP
+    CP["ce-compound<br/>docs/solutions/*.md, CONCEPTS.md"] --> SOL
+    BB["ce-babysit-pr"] -.-> SHIP
+    RPF["ce-resolve-pr-feedback"] -.-> BB
+    DBG["ce-debug (bug path)"] -.-> CR
+</pre>
+<ol>
+<li><strong><code>ce-strategy</code></strong> (optional) — interview → <code>STRATEGY.md</code>; read as grounding downstream.</li>
+<li><strong><code>ce-ideate</code></strong> (optional) — grounds against repo/<code>STRATEGY.md</code>/<code>docs/solutions/</code>, generates and critiques candidates → <code>docs/ideation/*.md</code>, feeds the survivor to brainstorm.</li>
+<li><strong><code>ce-brainstorm</code></strong> — one-question-at-a-time dialogue, checks <code>CONCEPTS.md</code>/<code>docs/solutions/</code> for conflicts → writes <code>&lt;root&gt;/plans/YYYY-MM-DD-HHMM-&lt;type&gt;-&lt;topic&gt;-plan.md</code>, frontmatter <code>artifact_contract: ce-unified-plan/v1</code>, <code>artifact_readiness: requirements-only</code> — a Goal Capsule + Product Contract, not HOW.</li>
+<li><strong><code>ce-plan</code></strong> — enriches <strong>the same file in place</strong> to <code>artifact_readiness: implementation-ready</code>, <code>execution: code</code>; adds U-ID'd implementation units, test scenarios, a confidence check.</li>
+<li><strong><code>ce-work</code></strong> — reads the plan's contract, branches, task list, test-first per unit, path-limited commits; may delegate to a cross-model "controller" but the host owns verification and the canonical commit.</li>
+<li><strong><code>ce-simplify-code</code></strong> — tightens the fresh diff.</li>
+<li><strong><code>ce-code-review</code></strong> — dispatches the persona roster concurrently, optional cross-model adversarial peer, returns findings only (mutates only with <code>apply:local</code>).</li>
+<li><strong><code>ce-commit-push-pr</code></strong> — commits, pushes, opens/updates PR; optional "New concepts" teaching section archived to <code>docs/explainers/</code>.</li>
+<li><strong><code>ce-compound</code></strong> — one solved problem per run → <code>docs/solutions/&lt;category&gt;/&lt;slug&gt;.md</code> (frontmatter: <code>category</code>, <code>tags</code>, <code>problem_type</code>, <code>severity</code>, <code>applies_when</code>), updates <code>CONCEPTS.md</code>. This file is what every future <code>ce-brainstorm</code>/<code>ce-plan</code>/<code>ce-code-review</code> is instructed to read — the actual compounding mechanism.</li>
+<li><strong><code>ce-babysit-pr</code></strong> (parallel) — watches the open PR, routes review comments to <code>ce-resolve-pr-feedback</code> and CI failures to <code>ce-debug</code>.</li>
+<li><strong><code>lfg</code></strong> — runs steps 3–10 hands-off with hard STOP gates (e.g. <code>settled-decision-invalidated</code>), pushing only when a remote exists.</li>
+</ol>
+<p>The "return arrow" is a plain filesystem read: <code>docs/solutions/</code> is a documented required-read for <code>ce-brainstorm</code>/<code>ce-plan</code> — no embeddings, hooks, or memory API implement the compounding.</p>
+<h2 id="core-beliefs-principles">Core beliefs / principles</h2>
+<ol>
+<li><strong>80/20 planning-to-execution.</strong> <em>"80% is in planning and review, 20% is in execution"</em> — README.md.</li>
+<li><strong>Each unit must make the next cheaper.</strong> <em>"Each unit of engineering work should make subsequent units easier -- not harder."</em> — README.md.</li>
+<li><strong>Learnings, not tribal memory, carry lessons forward.</strong> <em>"A documented solution to a past problem... stored as the unit of compounded knowledge so future work can find and reuse it."</em> — CONCEPTS.md.</li>
+<li><strong>Independence is earned by process isolation, not claimed by perspective.</strong> <em>"Two personas reasoned inside one context are two perspectives, not two witnesses."</em> — CONCEPTS.md, enforced live via <code>INDEPENDENCE_ACCOUNTING</code> in <code>context.mjs</code>.</li>
+<li><strong>Harness defaults must never be mistaken for user preference.</strong> <em>"A constraint that originates in your system prompt or harness configuration is never described to the user as their instruction, preference, or standing request."</em> — <code>skills/ce-plan/scripts/context.mjs</code>.</li>
+<li><strong>Skills state goals and conditions, not procedures.</strong> <em>"A skill is a set of goals, not a state machine... then gets out of the way."</em> — AGENTS.md.</li>
+<li><strong>Session-settled decisions are never re-litigated downstream.</strong> They're <em>"carried through the Pipeline as a provenance-labeled constraint... that downstream skills augment but never re-ask, and contradict only on evidence."</em> — CONCEPTS.md.</li>
+<li><strong>Reviews report; they don't fix.</strong> <em>"<code>ce-code-review</code> is review-only: it returns findings and never edits the checkout, commits, or applies them."</em> — <code>skills/ce-work/SKILL.md</code>.</li>
+<li><strong>A finding is only real if the stated condition doesn't already answer it.</strong> <em>"A case a stated condition already covers is not a finding."</em> — AGENTS.md.</li>
+<li><strong>Never implement inside planning; never plan inside execution.</strong> <em>"Research, decide, and write the plan — never implement."</em> — <code>skills/ce-plan/SKILL.md</code>.</li>
+</ol>
+<h2 id="mechanics-worth-stealing">Mechanics worth stealing</h2>
+<ul>
+<li><strong>Per-skill "Setup" context-injection script.</strong> Every skill runs a bundled Node script whose entire job is countering harness defaults in tool-result output, which "outranks a system-prompt default": <em>"the user's invocation of this skill is that request for the skill's shipped subagents; spawn them where a reference file directs, without re-asking"</em> (<code>context.mjs</code>). Fixes the class of bug where "you are autonomous, no one is watching" boilerplate makes a model skip questions or subagent dispatch even when a human is present.</li>
+<li><strong>Unified plan artifact with an explicit readiness field.</strong> <code>artifact_readiness: requirements-only | implementation-ready</code> lets brainstorm and plan write the <em>same file</em> progressively and lets <code>ce-work</code> refuse to execute an unready plan instead of guessing. Cheap, generalizable pattern for any pipeline risking a stage running on an unready artifact.</li>
+<li><strong>Confidence anchors instead of continuous scores.</strong> <em>"A discrete, self-scored confidence value on a fixed small scale, each level tied to a behavioral criterion... instead of a continuous score that invites false precision."</em> — CONCEPTS.md. Directly attacks LLM reviewers inventing spurious precision.</li>
+<li><strong><code>SKILL_DIR</code> model-filled anchor instead of platform env vars.</strong> The agent sets <code>SKILL_DIR="&lt;absolute path... you just read&gt;"</code> inline in the same shell command rather than relying on <code>${CLAUDE_PLUGIN_ROOT}</code> (Claude-only, breaks elsewhere) — portable because it depends on the agent's own knowledge, not a harness variable.</li>
+<li><strong>Load stubs that force real reads.</strong> <em>"A load instruction that names what the reference contains and the failure mode of skipping it, while keeping no detail an agent could improvise from — making the load structurally necessary rather than advisory."</em> — CONCEPTS.md. Explains why SKILL.md files are tables of "read <code>references/x.md</code>" rather than inlined procedure.</li>
+<li><strong>Fix-owned-files recorded before any edit.</strong> <code>ce-debug</code> snapshots <code>git status</code> before touching a file so the later commit can never sweep in unrelated WIP (<code>skills/ce-debug/SKILL.md</code>).</li>
+<li><strong>Residuals must land in a durable sink or the run isn't done.</strong> <em>"A review finding a run accepted or deferred rather than fixed, which must reach a durable sink before the run reports itself done — a section in the pull request body, or a ticket."</em> — CONCEPTS.md.</li>
+</ul>
+<h2 id="weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</h2>
+<ul>
+<li><strong>Enormous prompt surface for a solo user.</strong> <code>ce-plan</code> alone fans out across 15+ <code>references/*.md</code> files; every invocation can load thousands of lines of prose before writing code — heavy ceremony despite the README's stated aversion to it.</li>
+<li><strong>No enforcement that compounding actually compounds.</strong> The mechanism is "the next skill is told to read <code>docs/solutions/</code>" — no index, no dedup; <code>ce-compound-refresh</code> exists precisely because learnings drift stale or duplicate (already 78 files in this repo's own corpus).</li>
+<li><strong>Deep coupling to harness sophistication.</strong> Nearly every skill assumes a blocking-question tool, task-tracking, and reliable skill-to-skill invocation; multiple <code>docs/solutions/skill-design/*</code> files exist purely to patch specific harness incompatibilities (PowerShell parsing, Codex line-flattening, Claude-only variables).</li>
+<li><strong>The converter CLI is orthogonal to the methodology's value.</strong> ~11K lines of TypeScript exist to keep one plugin portable across 8+ ecosystems — irrelevant to whether compound engineering itself works, and dead weight for a team not distributing cross-host.</li>
+<li><strong>Self-referential complexity spiral, documented by the maintainers themselves.</strong> AGENTS.md cites 24 review-comment rounds on a two-condition skill step (#1397) and a 4,564-line test file needing manual splitting — evidence the meta-workflow has hit compounding <em>costs</em>, not only gains.</li>
+<li><strong>Cross-model machinery (peer review, <code>work_engine_mode</code>, Transport commits, model-identity receipts) only pays off in multi-agent/team settings</strong> — a solo engineer on one model absorbs the protocol complexity with none of the corroboration benefit.</li>
+<li><strong>Pure prompt discipline, no enforcement layer.</strong> Nothing stops a model from skipping a "required read" or fabricating a confidence anchor; the counter-directive scripts and fail-closed reference loading exist because this trust is repeatedly violated in the field.</li>
+</ul>
+<h2 id="fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</h2>
+<p><strong>Carries over well:</strong> the <code>brainstorm → plan → work → review → compound</code> skeleton fights "fix and forget" even solo; <code>ce-debug</code>'s causal-chain gate and escalate-rather-than-persist rule (stop after 2-3 hypotheses or 3 failed fixes) are cheap portable discipline; <code>ce-code-review</code>'s risk-driven persona selection keeps review cost proportional to actual risk; the requirements-only/implementation-ready split guards against coding before scope is settled.</p>
+<p><strong>Pure overhead for a one-day feature:</strong> <code>ce-strategy</code>, <code>ce-ideate</code>, <code>ce-product-pulse</code>, <code>ce-sweep</code>, <code>ce-optimize</code>, <code>ce-retune</code>, <code>ce-promote</code>, <code>ce-proof</code>, and cross-model peer routing are team/portfolio-scale concerns that won't earn their setup cost in a day; session-settled-decision provenance and independence accounting exist for adversarial multi-agent settings a solo reviewer doesn't have; <code>lfg</code>'s hands-off pipeline is built for unattended multi-hour runs — a focused day is better served driving <code>ce-plan → ce-work → ce-code-review</code> interactively and skipping the autonomous shipping tail. Given the maintainers themselves need <code>CONCEPTS.md</code>, artifact-contract semantics, and config layering to operate this system, the realistic on-ramp is hours, not minutes — worth it for a team standardizing workflow, hard to justify for one day of solo shipping.</p>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#tldr">TL;DR</a><a href="#inventory">Inventory</a><a href="#the-core-engineering-flow">The core engineering flow</a><a href="#core-beliefs-principles">Core beliefs / principles</a><a href="#mechanics-worth-stealing">Mechanics worth stealing</a><a href="#weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</a><a href="#fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

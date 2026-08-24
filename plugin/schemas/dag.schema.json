@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sage-mode task DAG",
+  "type": "object",
+  "required": ["version", "sprint", "base", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "sprint": { "type": "string", "pattern": "^[0-9]{2}(-[a-z0-9-]+)?$" },
+    "base": { "type": "string", "description": "git ref the sprint branches from" },
+    "profile": { "enum": ["web", "api", "cli", "ai-product"] },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "role", "owns", "acceptance", "verify", "risk"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^n[0-9]+$" },
+          "title": { "type": "string", "minLength": 8, "maxLength": 120 },
+          "role": { "enum": ["frontend", "backend", "data", "infra", "ai", "design"] },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^n[0-9]+$" },
+            "default": []
+          },
+          "owns": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "reads": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          },
+          "acceptance": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 10 }
+          },
+          "verify": { "type": "string", "minLength": 1 },
+          "risk": { "enum": ["low", "medium", "high"] },
+          "design": { "enum": ["none", "required"], "default": "none" },
+          "model": { "type": ["string", "null"], "default": null },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}

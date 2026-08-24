@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sage-mode Architecture v2 · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html" class="on">Design</a><a href="../research/overview.html">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Design</div>
+    <h1>sage-mode Architecture v2</h1>
+    <div class="sub">Superseded by v3 — introduced the org chart and the sprint model</div>
+  </div>
+  <p><strong>Status:</strong> draft for review · <strong>Supersedes:</strong> <a href="./architecture.html">v0.1</a> · <strong>Date:</strong> 2026-08-21</p>
+<blockquote>
+<p><strong>In plain terms:</strong> v1 was a pipeline. v2 is an organization. You talk to one agent — Sage — and underneath it there's a product manager, an architect, an engineering manager, a bench of specialist implementers, an adversarial reviewer on a different model, and a QA agent. Work is organized in sprints: one chat is one week. The research into what Cursor can actually do changed several things, and your feedback killed a few more. This document says what the org is, how it runs, what it costs, and what will break.</p>
+</blockquote>
+<hr />
+<h2 id="1-what-changed-from-v1">1. What changed from v1</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Six changes. Three came from your feedback, three from discovering what Cursor can and can't do.</p>
+</blockquote>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>v1</th>
+<th>v2</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Ceremony chosen by <strong>time budget</strong> (<code>--by 6h</code>)</td>
+<td>Ceremony chosen by <strong>scope tier</strong> (project → sprint → task)</td>
+<td>Your call: the goal is scaling throughput, not putting a clock on it. Scope tier is also the more honest signal — a 20-minute task and a 20-minute spike need different process, and the difference isn't duration.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>One linear pipeline per feature</td>
+<td><strong>Sprint model</strong> — a chat is a week, a sprint ships many features as one PR</td>
+<td>Your superpowers critique: one plan per run is too small a unit. Real products need tens of plans layering complexity. The sprint is the container that lets a chat hold more than one plan.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>sage-shape</code> produced a spec per feature</td>
+<td><code>sage-shape</code> produces the <strong>project roadmap</strong> — a living feature map every sprint updates with links</td>
+<td>You want a map, not a pile of specs. The roadmap becomes the notebook's spine.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Personas as prose inside big skill files</td>
+<td><strong>Roles as <code>agents/*.md</code> with per-role model assignment</strong></td>
+<td>Cursor supports <code>model: claude-opus-5[effort=high,context=300k]</code> per subagent. The org chart is literally a directory of small config files. None of the five reference repos used this.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>sage-proof</code> — a <code>stop</code> hook that blocks turn-end</td>
+<td><code>sage-proof</code> — a <code>stop</code> hook that <strong>nags</strong> via <code>followup_message</code>, capped by <code>loop_limit</code></td>
+<td>Cursor's <code>stop</code> hook cannot block. Documented: <em>"Can block: No."</em> Different mechanism, different failure mode, honest about it.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>simplify-ignore</code>-style content hiding on read</td>
+<td><strong>Deleted</strong></td>
+<td>Cursor's <code>beforeReadFile</code> cannot rewrite content — <em>"they observe or gate access without content modification."</em> The pattern doesn't port.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Also dropped: <code>sage-compound</code> as a separate skill (folded into <code>sage-retro</code>), and <code>sage-review</code> as a top-level phase (it's a role that runs <em>inside</em> <code>sage-build</code>, plus a gate before verify).</p>
+<hr />
+<h2 id="2-thesis">2. Thesis</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> You are not a senior engineer using better tools. You are the person an engineering organization reports to. sage-mode's job is to make that organization real, cheap enough to run continuously, and disciplined enough that you can trust the output without reading every line.</p>
+</blockquote>
+<p>Three commitments:</p>
+<ol>
+<li><strong>You run an org, not a workflow.</strong> One entry point — Sage — routes every message. Underneath sit named roles with their own models, briefs, and scopes. You do product and priority; the org does execution.</li>
+<li><strong>The sprint is the unit.</strong> A chat is a week. Monday you and the PM decide what ships. Tuesday–Thursday the team builds and reviews. Friday it goes up as a PR. That container is what lets a single session produce a coherent feature <em>set</em> rather than one bite-sized task.</li>
+<li><strong>Token efficiency is a design constraint, not an optimization.</strong> gstack proves the failure mode: <code>office-hours/SKILL.md</code> runs ~1,740 lines before its six questions start, roughly half of every large skill is repeated boilerplate, and a dedicated tool exists solely to audit the bill. We buy quality with <em>model tiering, retrieval, and scoping</em> — never with volume of prompt.</li>
+</ol>
+<p><strong>The counterweight, stated up front:</strong> Cursor's own research team ran the swarm experiment at scale and published the failure modes — <em>split-brain duplication, planner contention, merge conflicts, "megafiles," and code ossification</em>. The community's complaint about parallel agents is that review burden multiplies per agent. An org design that doesn't answer those specifically is a fantasy. §8 answers them one by one.</p>
+<hr />
+<h2 id="3-the-organization">3. The organization</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Nine roles. Three of them run in your main chat because they need to talk to you. Six run as subagents with their own models. The model assignment is where cost and quality actually get decided.</p>
+</blockquote>
+<pre class="mermaid">flowchart TD
+    YOU([You]) --> SAGE["Sage — chief of staff / router<br/>main thread"]
+    SAGE --> YOU
+    SAGE --> PM["Product — technical PM<br/>main thread · interrogates you"]
+    SAGE --> EM["Eng Manager — build controller<br/>main thread · dispatches + unblocks"]
+    PM -.consults.-> ARCH["Architect — subagent<br/>opus-5 effort=high"]
+    EM --> I1["Implementer: frontend<br/>composer-2"]
+    EM --> I2["Implementer: backend<br/>composer-2"]
+    EM --> I3["Implementer: data/infra<br/>composer-2"]
+    EM --> I4["Implementer: ai-product<br/>sonnet-5"]
+    I1 -.-> REV["Reviewer — adversarial<br/>gpt-5.6-sol · different vendor"]
+    I2 -.-> REV
+    I3 -.-> REV
+    I4 -.-> REV
+    EM --> QA["QA — subagent + Browser<br/>sonnet-5"]
+    SAGE --> LIB["Librarian — notebook + learnings<br/>gemini-3.7-flash"]
+    SAGE --> SCOUT["Scout — recall/search<br/>built-in Explore"]
+</pre>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Where it runs</th>
+<th>Model</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Sage</strong></td>
+<td>main thread</td>
+<td>session default (Auto)</td>
+<td>Entry point. Classifies every message, loads the right skill, holds sprint state, refuses to let you skip a gate silently.</td>
+</tr>
+<tr>
+<td><strong>Product</strong></td>
+<td>main thread</td>
+<td><code>claude-opus-5[effort=high]</code></td>
+<td>The technical-PM interrogation. One question at a time. Runs <code>sage-shape</code> and <code>sage-plan</code>.</td>
+</tr>
+<tr>
+<td><strong>Architect</strong></td>
+<td>subagent</td>
+<td><code>claude-opus-5[effort=high,context=300k]</code></td>
+<td>Technical design and DAG decomposition. Reads the codebase, proposes structure, names failure modes. Produces a document, not a conversation.</td>
+</tr>
+<tr>
+<td><strong>Eng Manager</strong></td>
+<td>main thread</td>
+<td>session default</td>
+<td>Runs <code>sage-build</code>. Owns the ledger, dispatches implementers, resolves blockers, decides merge order at joins.</td>
+</tr>
+<tr>
+<td><strong>Implementer</strong> ×N</td>
+<td>subagent</td>
+<td><code>composer-2</code> (default) / <code>claude-sonnet-5</code> (risk ≥ high)</td>
+<td>One per DAG node. TDD, commits inside its own worktree, writes a node report. Specialties: frontend, backend, data, infra, ai-product.</td>
+</tr>
+<tr>
+<td><strong>Reviewer</strong></td>
+<td>subagent</td>
+<td><code>gpt-5.6-sol</code> or <code>gemini-3.1-pro</code></td>
+<td>Adversarial review with <strong>a different vendor's model</strong> — real independence, no external CLI needed. Given artifact + contract, never the author's claim.</td>
+</tr>
+<tr>
+<td><strong>QA</strong></td>
+<td>subagent</td>
+<td><code>claude-sonnet-5</code> + built-in Browser</td>
+<td><code>sage-verify</code>. Drives the real app, screenshots viewports, reads console, runs the profile's evidence suite.</td>
+</tr>
+<tr>
+<td><strong>Librarian</strong></td>
+<td>subagent</td>
+<td><code>gemini-3.7-flash</code></td>
+<td>Renders the notebook, maintains the roadmap and index, writes learnings at retro. Bulk text work on a cheap model.</td>
+</tr>
+<tr>
+<td><strong>Scout</strong></td>
+<td>built-in <code>Explore</code></td>
+<td>inherit</td>
+<td>Codebase and notebook search. Backs <code>sage-recall</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Why three roles run in the main thread:</strong> subagents cannot ask you questions. Any interrogation, any gate, any "which of these two do you want" has to happen where you are. This is a hard constraint, not a style choice — and it's why Product and Eng Manager are personas the main agent <em>adopts</em> rather than subagents it dispatches.</p>
+<p><strong>Why the reviewer is a different vendor:</strong> Compound Engineering's line is the one to internalize — <em>"Two personas reasoned inside one context are two perspectives, not two witnesses."</em> Same model, same priors, same blind spots. Cursor's per-subagent <code>model</code> field makes cross-vendor review a one-line config change. gstack shells out to the Codex CLI to get this; we get it for free.</p>
+<hr />
+<h2 id="4-the-flow">4. The flow</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Seven skills. <code>shape</code> runs once per project (and again on major changes). <code>plan</code> through <code>retro</code> run once per sprint — that's your week, and that's one chat.</p>
+</blockquote>
+<pre class="mermaid">flowchart TD
+    START(["/sage-mode-start"]) --> ROUTER["Sage routes every message"]
+    ROUTER -->|new project or major change| SHAPE
+    ROUTER -->|new sprint| PLAN
+    ROUTER -->|question, lookup| RECALL["sage-recall"]
+
+    SHAPE["sage-shape · Product<br/>one question at a time<br/>problem · users · stories · flow"]
+    SHAPE --> ROADMAP[("docs/roadmap.html<br/>living feature map<br/>+ timeline")]
+    ROADMAP --> G0{{"GATE · you approve the roadmap"}}
+
+    G0 --> PLAN["sage-plan · Product + Architect + you<br/>sprint scoping conversation<br/>what ships this week"]
+    PLAN --> SPEC[("docs/sprints/NN/spec.html")]
+    SPEC --> G1{{"GATE · you approve the sprint spec"}}
+
+    G1 --> DAG["sage-dag · Architect<br/>technical spec + task graph<br/>owners · file lanes · verify commands"]
+    DAG --> PLANJSON[("docs/sprints/NN/plan.html<br/>+ dag.json")]
+    PLANJSON --> G2{{"GATE · you approve the DAG"}}
+
+    G2 --> BUILD["sage-build · Eng Manager<br/>worktree per lane · implementers in parallel<br/>reviewer per node · loop until green"]
+    BUILD --> LEDGER[(".sage/sprints/NN/ledger.md")]
+    BUILD --> G3{{"GATE · you approve the integrated branch"}}
+
+    G3 --> VERIFY["sage-verify · QA<br/>real runtime evidence per profile"]
+    VERIFY -->|findings| BUILD
+    VERIFY -->|clean| G4{{"GATE · you approve shipping"}}
+
+    G4 --> SHIP["sage-ship<br/>changelog · version · PR<br/>NO deploy"]
+    SHIP --> RETRO["sage-retro · Librarian<br/>learnings · roadmap update<br/>tune the system"]
+    RETRO -.updates.-> ROADMAP
+</pre>
+<h3 id="sage-shape-the-project-intake"><code>sage-shape</code> — the project intake</h3>
+<p>Runs at project start, and again before any refactor or major change. Product interrogates you <strong>one question at a time</strong> — never a wall of questions — until the problem is genuinely pinned down:</p>
+<ul>
+<li>Who has this problem, and what breaks for them today?</li>
+<li>What do they do instead right now? (The status quo is the real competitor.)</li>
+<li>What is the narrowest wedge that would be genuinely useful?</li>
+<li>What are the user stories, in their words?</li>
+<li>What is the ideal flow, screen by screen or call by call?</li>
+<li>How will we know it worked? What is observable?</li>
+</ul>
+<p>Borrowed from gstack's <code>office-hours</code>, but with its 1,740-line preamble deleted and its demand-reality test kept: <em>"Interest is not demand. Waitlists, signups, 'that's interesting' — none of it counts. Behavior counts."</em></p>
+<p><strong>Output:</strong> <code>docs/roadmap.html</code> — the living feature map and timeline for the whole project. Not a spec. A <strong>map</strong>: what we're building, in what order, why, and what's shipped. Every sprint appends to it with links to that sprint's spec and plan. This is the notebook's spine and the first thing every other skill reads.</p>
+<h3 id="sage-plan-the-sprint"><code>sage-plan</code> — the sprint</h3>
+<p>A three-way conversation: you, the Product persona, and the Architect (consulted as a subagent for technical reality checks). One question at a time. The frame is Monday morning sprint planning:</p>
+<ul>
+<li>What are the candidate features and bugs? (Pulled from the roadmap and any open findings.)</li>
+<li>What's the actual priority, and what's the dependency order?</li>
+<li>What's in scope this week and what explicitly isn't?</li>
+<li>Where's the technical risk, and what does the Architect say about it?</li>
+<li>What does "shipped" mean for each item?</li>
+</ul>
+<p><strong>Output:</strong> <code>docs/sprints/NN-&lt;name&gt;/spec.html</code> — the sprint contract. Plus a roadmap update marking what's in flight.</p>
+<h3 id="sage-dag-the-technical-plan"><code>sage-dag</code> — the technical plan</h3>
+<p>The Architect turns the approved sprint spec into a task graph. Every node declares:</p>
+<pre><code class="language-jsonc">{
+  &quot;id&quot;: &quot;n7&quot;,
+  &quot;title&quot;: &quot;Add rate limiting to the ingest endpoint&quot;,
+  &quot;role&quot;: &quot;backend&quot;,                    // which implementer specialty
+  &quot;depends_on&quot;: [&quot;n3&quot;],                 // DAG edges
+  &quot;owns&quot;: [&quot;src/api/ingest/**&quot;, &quot;tests/api/ingest/**&quot;],   // file lane — enforced by hook
+  &quot;acceptance&quot;: [&quot;429 after 100 req/min per key&quot;, &quot;...&quot;],
+  &quot;verify&quot;: &quot;pnpm test tests/api/ingest&quot;,   // must pass before the node reports done
+  &quot;risk&quot;: &quot;medium&quot;,                     // drives model tier
+  &quot;model&quot;: null                         // null = tier default, or an override
+}
+</code></pre>
+<p><strong>Output:</strong> <code>docs/sprints/NN/plan.html</code> (rendered, with the DAG as a diagram) + <code>dag.json</code> (machine-readable).</p>
+<p><strong>Hard rule:</strong> the Architect may not emit a graph where two parallel nodes have overlapping <code>owns</code> globs. Overlap forces serialization. This is what makes worktree parallelism safe, and it's the single highest-value constraint in the whole design.</p>
+<h3 id="sage-build-the-week"><code>sage-build</code> — the week</h3>
+<p>The Eng Manager runs it:</p>
+<ol>
+<li>Topologically sort <code>dag.json</code> into waves.</li>
+<li>For each wave, allocate a worktree per parallel lane and dispatch one Implementer subagent per node with a <strong>file-based brief</strong> (never pasted history — superpowers: <em>"Everything you paste into a dispatch prompt stays resident in your context"</em>).</li>
+<li>Each Implementer works TDD inside its lane, commits per acceptance criterion, and writes <code>node-&lt;id&gt;-report.md</code>.</li>
+<li>On node completion, dispatch the Reviewer (different vendor) against a diff package — artifact and contract only, never the implementer's claim. Findings loop back for up to 3 rounds; round 4 escalates the model; round 5 escalates to you.</li>
+<li>At a join, merge lanes, run integration verify, resolve conflicts, update the ledger.</li>
+<li>Repeat until the DAG is drained.</li>
+</ol>
+<p><strong>Ledger:</strong> <code>.sage/sprints/NN/ledger.md</code>, first line naming the sprint, updated after every node and join. It survives compaction — superpowers' documented worst failure: <em>"Controllers that lost their place have re-dispatched entire completed task sequences."</em> Over a chat that represents a week, compaction is a certainty, not a risk.</p>
+<h3 id="sage-verify-qa"><code>sage-verify</code> — QA</h3>
+<p>Post-development, pre-ship. The QA role runs the <strong>verification profile</strong> matching the project:</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>Evidence it must produce</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>web</code></td>
+<td>Real browser via Cursor's Browser subagent / Design Mode. Screenshots at 375/768/1024/1440/1920. Console errors. Every user story in the sprint spec walked end to end.</td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td>Contract tests against the spec, migration safety check, error-path coverage, load smoke test.</td>
+</tr>
+<tr>
+<td><code>cli</code></td>
+<td>Golden-file tests, real invocation in a clean sandbox, time-to-hello-world measured against the docs.</td>
+</tr>
+<tr>
+<td><code>ai-product</code></td>
+<td>Eval suite run, prompt regression vs. baseline, trigger/routing accuracy.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Findings that aren't clean route straight back into <code>sage-build</code> as new nodes. No "done" without evidence in <code>docs/sprints/NN/evidence/</code>.</p>
+<h3 id="sage-ship"><code>sage-ship</code></h3>
+<p>Re-run verify, bump version, write the changelog from node reports, open the PR with review findings and evidence embedded. <strong>It does not deploy.</strong> You do that.</p>
+<p>Optionally fires Bugbot (<code>POST /bugbot/review</code>) as a final independent pass on the PR — a fourth opinion, rate-limited to 30/min/team.</p>
+<h3 id="sage-retro"><code>sage-retro</code></h3>
+<p>The Librarian closes the week:</p>
+<ul>
+<li>One durable learning per notable problem → <code>docs/learnings/&lt;category&gt;/&lt;slug&gt;.md</code>, <strong>deduped against the search index before writing</strong> (this is where Compound Engineering's flat 78-file folder went wrong).</li>
+<li>Roadmap updated: what shipped, what slipped, what changed.</li>
+<li>Notebook re-rendered and re-indexed.</li>
+<li><strong>System tuning:</strong> which nodes needed the most review rounds? Which briefs were ambiguous? Which model tier was wrong? Proposed edits to sage-mode's own skills land as a diff you approve. This is the part that compounds.</li>
+</ul>
+<hr />
+<h2 id="5-the-notebook">5. The notebook</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Project scope only, as you said. Each project grows a <code>docs/</code> website. The roadmap is the front page. Everything else hangs off it.</p>
+</blockquote>
+<pre><code>docs/
+├── index.html                  # project home
+├── roadmap.html                # THE MAP — features, order, status, links
+├── sprints/
+│   └── 03-billing-v1/
+│       ├── spec.html           # what we agreed to ship
+│       ├── plan.html           # the DAG, rendered
+│       ├── dag.json            # machine-readable
+│       ├── review.html         # findings
+│       └── evidence/           # screenshots, logs, eval output
+├── learnings/                  # deduped, indexed, categorized
+├── decisions/                  # ADRs — why, not what
+├── preferences/                # standing decisions for THIS project
+└── assets/
+</code></pre>
+<p>Cross-project preferences live in the plugin's own user config, not in any project's notebook. A <code>docs/</code> directory belongs to one repo.</p>
+<p><strong>House rules, enforced by the Librarian:</strong> markdown is the source and HTML is the artifact; every <code>##</code> section opens with a plain-language summary before the technical detail; every DAG, flow, and state machine renders as a diagram rather than a nested list; every page is linked from the roadmap or the index; nothing external is fetched at render time.</p>
+<hr />
+<h2 id="6-token-economics">6. Token economics</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> You asked for Google-quality output without gstack's bill. That's a design problem with six specific answers, and one of them — putting the right model on each role — is worth more than the other five combined.</p>
+</blockquote>
+<p><strong>The budget.</strong> Cursor shows token usage split by category (system prompts, tools, rules, skills, MCP, subagent docs, summarized conversation, active dialogue), and <code>/context</code> in the CLI does the same. So this is measurable, and <code>sage-retro</code> should report it.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Mechanism</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Model tiering per role</strong></td>
+<td>Implementers on <code>composer-2</code>; only the Architect and Reviewer get frontier models. Cursor's own Router data reports <em>"Auto Intelligence: Fable-level satisfaction at 68% lower cost"</em> — tiering is where the money is.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Skeleton skills + <code>references/</code></strong></td>
+<td>Every <code>SKILL.md</code> ≤ 120 lines, routing to reference files loaded on trigger. Cursor supports this natively: <em>"Agents load resources progressively—only when needed."</em></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Zero shared preamble</strong></td>
+<td>No telemetry block, no ethos injection, no repeated contract text per skill. gstack's ~800 lines of boilerplate per skill is the explicit anti-pattern.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Role cards ≤ 80 lines</strong></td>
+<td>A specialist is a small file with a model, a scope, and a checklist — not a personality essay.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>File-based briefs</strong></td>
+<td>Dispatch passes paths, never pasted context. Keeps the manager's window clean across a whole sprint.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong><code>sage-recall</code> instead of loading</strong></td>
+<td>~25 catalog skills stay on disk until a query pulls one in.</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>The hard limit you can't optimize away:</strong> <em>"Running five subagents in parallel uses roughly five times the tokens of a single agent."</em> Parallelism buys wall-clock, never tokens. So the DAG's job is not "maximize parallelism" — it is <strong>maximize independent work per review</strong>. A node that needs three review rounds cost more than three serial nodes that needed none.</p>
+<p>⚠️ One trap to close on day one: Cursor auto-loads skills from <code>.claude/skills/</code>, <code>.codex/skills/</code>, and their global equivalents in addition to its own roots. If you have other skill libraries installed, you're paying for them every session. The IDE has a toggle; <strong>the CLI does not</strong>.</p>
+<hr />
+<h2 id="7-enforcement">7. Enforcement</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Four hooks, rewritten against what Cursor actually supports. Two of them do exactly what v1 promised. One is weaker than promised. One was deleted because it's impossible.</p>
+</blockquote>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Event</th>
+<th>What it does</th>
+<th>Status vs. v1</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sage-careful</code></td>
+<td><code>beforeShellExecution</code></td>
+<td>Denies destructive shell — <code>rm -rf</code> outside a worktree, force-push to the default branch, destructive SQL against non-local DSNs. <code>failClosed: true</code>.</td>
+<td>✅ as designed</td>
+</tr>
+<tr>
+<td><code>sage-lane</code></td>
+<td><code>preToolUse</code> matcher <code>Write\|Delete</code></td>
+<td>During a sprint, an Implementer may only write inside its node's <code>owns</code> globs. Denies otherwise with an <code>agent_message</code> telling it to request a lane amendment. <code>failClosed: true</code>.</td>
+<td>⚠️ <strong>needs verification</strong> — the docs show <code>tool_input</code> only for Shell; whether Write carries <code>file_path</code> is undocumented. Test before building.</td>
+</tr>
+<tr>
+<td><code>sage-solo</code></td>
+<td><code>subagentStart</code></td>
+<td>Reviewers may not spawn subagents. Matcher on <code>subagent_type</code>; <code>ask</code> is treated as <code>deny</code>. Note Cursor allows one nesting level, so manager → implementer → reviewer is legal and intended.</td>
+<td>✅ as designed</td>
+</tr>
+<tr>
+<td><code>sage-proof</code></td>
+<td><code>stop</code></td>
+<td>If the turn claims completion and the node's <code>verify</code> command hasn't passed since the last edit, return a <code>followup_message</code> forcing the fix.</td>
+<td>⚠️ <strong>weaker than v1</strong> — <code>stop</code> cannot block (<em>"Can block: No"</em>). It nags, capped by <code>loop_limit</code> (default 5).</td>
+</tr>
+<tr>
+<td><code>sage-bootstrap</code></td>
+<td><code>sessionStart</code></td>
+<td>Injects the sprint state, the roadmap summary, and the spine index via <code>additional_context</code>.</td>
+<td>⚠️ <strong>not available in Cloud Agents.</strong> Mitigate with an <code>alwaysApply: true</code> rule as a floor.</td>
+</tr>
+<tr>
+<td>~~<code>simplify-ignore</code>~~</td>
+<td>—</td>
+<td>—</td>
+<td>❌ <strong>deleted.</strong> <code>beforeReadFile</code> cannot rewrite content.</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Two rules for every hook we ship:</strong> set <code>failClosed: true</code> (Cursor's default is fail-open — a crashed hook silently stops enforcing), and strip the UTF-8 BOM from stdin before parsing (an <a href="https://forum.cursor.com/t/on-windows-cursor-s-hook-stdin-json-payload-includes-a-utf-8-bom-that-breaks-standard-json-parse-causing-security-guards-to-silently-degrade-to-allowing-commands-across-all-agent-channels/166794">unresolved Windows bug</a> silently degrades security hooks to allow-all, including in Cursor's own doc examples).</p>
+<hr />
+<h2 id="8-coordination-and-the-five-ways-this-breaks">8. Coordination — and the five ways this breaks</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> You asked for agents that can communicate and get feedback from the manager. Cursor gives us no way for two subagents to talk to each other, so the manager is the bus and a shared directory is the channel. Then: Cursor's own research names five ways swarms fail. Here's our answer to each.</p>
+</blockquote>
+<h3 id="how-communication-actually-works">How "communication" actually works</h3>
+<p>There is no peer channel. What we build instead:</p>
+<pre><code>.sage/sprints/NN/
+├── ledger.md              # authoritative state — nodes, waves, joins, verdicts
+├── board/
+│   ├── n7.status          # claimed | building | in-review | blocked | done
+│   ├── n7.blocker.md      # a question the implementer needs answered
+│   └── n7.answer.md       # the manager's ruling, written back
+├── briefs/n7-brief.md     # dispatch input, file-based
+└── reports/n7-report.md   # dispatch output
+</code></pre>
+<p>An Implementer that needs something from another lane writes a blocker file and stops. The Eng Manager — the only role that sees everything — reads it, rules, writes the answer, and re-dispatches. Two mechanisms make this cheap:</p>
+<ul>
+<li><code>subagentStop</code> returns a <code>followup_message</code>, so the manager can chain the next action automatically when a node finishes.</li>
+<li><code>postToolUse</code> returns <code>additional_context</code>, so the ledger's current state can be injected right after a Task call returns — the manager stays oriented without re-reading files every turn.</li>
+</ul>
+<p><strong>Rulings over stalls</strong>, borrowed verbatim in spirit from superpowers: <em>"A wrong ruling costs rework your human partner can see and undo; a session parked on a question costs their whole day."</em> The manager rules and logs it. Only four categories reach you mid-sprint: destructive operations, security-sensitive decisions, effects outside the worktree, and plan defects that invalidate the spec.</p>
+<h3 id="the-five-failure-modes">The five failure modes</h3>
+<p>Cursor published these from running swarms at scale. Ignoring them would be negligent.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>What it is</th>
+<th>Our answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Split-brain duplication</strong></td>
+<td>Two agents independently build the same thing</td>
+<td><code>owns</code> globs are disjoint by construction; the Architect can't emit an overlapping parallel graph. The ledger is the single claim registry.</td>
+</tr>
+<tr>
+<td><strong>Planner contention</strong></td>
+<td>Workers fight over a central plan</td>
+<td>The DAG is frozen at Gate 2. Changes require a lane amendment through the manager, logged — the plan is never edited by a worker.</td>
+</tr>
+<tr>
+<td><strong>Merge conflicts</strong></td>
+<td>Parallel worktrees collide at the join</td>
+<td>Disjoint lanes make same-file conflicts structurally rare. Joins are ordered by dependency, integration-verified, and the manager owns conflict resolution — never an implementer.</td>
+</tr>
+<tr>
+<td><strong>Megafiles</strong></td>
+<td>Agents pile everything into one growing file</td>
+<td>A node with an <code>owns</code> glob resolving to a single large file is a planning smell; the Architect must split it. Reviewer checks file growth per node.</td>
+</tr>
+<tr>
+<td><strong>Code ossification</strong></td>
+<td>Nobody refactors because everything is generated</td>
+<td><code>sage-shape</code> re-runs on major changes. <code>sage-retro</code> surfaces churn hot-spots. Refactors are first-class sprint items, not chores.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="and-the-honest-one-review-burden">And the honest one: review burden</h3>
+<p>The community's real objection to parallel agents is that each one adds a review session. Our answer is that <strong>you don't review nodes</strong> — the Reviewer subagent does, on a different vendor's model, per node, before the join. You review at Gate 3, once, on the integrated branch, with findings and evidence already attached. If that turns out not to be enough, the fallback is fewer, larger nodes — not more of your attention.</p>
+<hr />
+<h2 id="9-repo-layout">9. Repo layout</h2>
+<pre><code>sage-mode/
+├── .cursor-plugin/plugin.json
+├── skills/
+│   ├── sage/SKILL.md              # the router — entry point
+│   ├── sage-shape/                # project intake → roadmap
+│   ├── sage-plan/                 # sprint scoping → spec
+│   ├── sage-dag/                  # technical plan → dag.json
+│   ├── sage-build/                # the week
+│   ├── sage-verify/               # QA + evidence
+│   ├── sage-ship/                 # changelog + PR
+│   ├── sage-retro/                # learnings + tuning
+│   ├── sage-notebook/             # render + index
+│   ├── sage-recall/               # search
+│   └── catalog/                   # ~25, never auto-loaded
+├── agents/                        # THE ORG CHART
+│   ├── architect.md               # opus-5[effort=high,context=300k]
+│   ├── implementer-frontend.md    # composer-2
+│   ├── implementer-backend.md     # composer-2
+│   ├── implementer-data.md        # composer-2
+│   ├── implementer-ai.md          # sonnet-5
+│   ├── reviewer.md                # gpt-5.6-sol  ← different vendor
+│   ├── qa.md                      # sonnet-5 + Browser
+│   └── librarian.md               # gemini-3.7-flash
+├── commands/                      # /sage-mode-start, /sprint, /status
+├── rules/sage-floor.mdc           # alwaysApply — bootstrap fallback for cloud
+├── hooks/{hooks.json,sage-careful,sage-lane,sage-solo,sage-proof,sage-bootstrap}
+├── lib/{dag,recall,notebook,board}/
+├── profiles/{web,api,cli,ai-product}.json
+├── templates/                     # roadmap, spec, plan, review, learning
+├── docs/                          # sage-mode's own notebook (dogfood)
+└── evals/                         # routing accuracy + pipeline integrity
+</code></pre>
+<hr />
+<h2 id="10-build-order">10. Build order</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Six phases, each independently useful. Phase 2 is the point where sage-mode starts building sage-mode.</p>
+</blockquote>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Ships</th>
+<th>Useful on its own because</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>0 — Notebook</strong></td>
+<td><code>sage-notebook</code>, renderer, roadmap + spec + plan templates, <code>docs/</code> structure</td>
+<td>Everything downstream writes into it. Already prototyped.</td>
+</tr>
+<tr>
+<td><strong>1 — Front half</strong></td>
+<td><code>sage</code>, <code>sage-shape</code>, <code>sage-plan</code>, Product persona, Gates 0–1</td>
+<td>The interrogation-to-roadmap loop is valuable with zero agents underneath it.</td>
+</tr>
+<tr>
+<td><strong>2 — Serial build</strong></td>
+<td><code>sage-dag</code> (graph, no parallelism), <code>sage-build</code> serial, Implementer + Reviewer roles, <code>sage-ship</code></td>
+<td>A working single-lane pipeline with cross-vendor review. <strong>Dogfood from here on.</strong></td>
+</tr>
+<tr>
+<td><strong>3 — Enforcement</strong></td>
+<td><code>sage-careful</code>, <code>sage-proof</code>, <code>sage-bootstrap</code>, <code>sage-solo</code></td>
+<td>Cheap, high-value. Verify the <code>sage-lane</code> payload question here before phase 4 depends on it.</td>
+</tr>
+<tr>
+<td><strong>4 — Parallel</strong></td>
+<td>Worktree allocation, <code>sage-lane</code>, the board, joins, integration verify</td>
+<td>The riskiest phase. Only build it once serial is trustworthy.</td>
+</tr>
+<tr>
+<td><strong>5 — Verify + retro</strong></td>
+<td>Profiles (<code>ai-product</code> first — sage-mode is one), <code>sage-verify</code>, <code>sage-retro</code>, <code>sage-recall</code>, catalog</td>
+<td>Closes the loop and turns the notebook into memory.</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="11-open-questions">11. Open questions</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> What I'd want settled before writing code. The first two are testable in an hour.</p>
+</blockquote>
+<ol>
+<li><strong>Does <code>preToolUse</code>'s <code>tool_input</code> carry <code>file_path</code> for Write?</strong> If not, <code>sage-lane</code> isn't buildable as designed and lane enforcement falls back to <code>afterFileEdit</code> detection plus revert — strictly worse. <strong>Test first.</strong></li>
+<li><strong>Do plugin-shipped subagents honor their <code>model</code> frontmatter?</strong> The manifest documents an <code>agents</code> field; the subagents doc doesn't mention plugin distribution. The entire cost model depends on this.</li>
+<li><strong>How long is a sprint really?</strong> "A week" is a scope metaphor, but the actual limit is the context window and compaction. If a sprint reliably outlives one chat, the ledger becomes load-bearing infrastructure and <code>sage-build</code> needs a first-class resume path.</li>
+<li><strong>When does <code>sage-shape</code> re-run?</strong> "Major changes" is doing a lot of work. Is it a manual call, or does something detect drift between the roadmap and the code?</li>
+<li><strong>What happens to a node the reviewer rejects five times?</strong> v2 escalates to you. But an implementer stuck in a review loop is burning tokens linearly — is there a circuit breaker that abandons the node and re-plans instead?</li>
+<li><strong>Cursor CLI parity.</strong> Plugin support in <code>cursor-agent</code> has broken repeatedly through 2026. If sage-mode is IDE-only, headless and scheduled runs are off the table — which forecloses Automations and the "agent picks up work from a webhook" pattern entirely.</li>
+</ol>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#1-what-changed-from-v1">1. What changed from v1</a><a href="#2-thesis">2. Thesis</a><a href="#3-the-organization">3. The organization</a><a href="#4-the-flow">4. The flow</a><a href="#5-the-notebook">5. The notebook</a><a href="#6-token-economics">6. Token economics</a><a href="#7-enforcement">7. Enforcement</a><a href="#8-coordination-and-the-five-ways-this-breaks">8. Coordination — and the five ways this breaks</a><a href="#9-repo-layout">9. Repo layout</a><a href="#10-build-order">10. Build order</a><a href="#11-open-questions">11. Open questions</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

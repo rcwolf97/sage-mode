@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sage-mode evidence record",
+  "type": "object",
+  "required": ["ts", "label", "command", "cmd_sha256", "exit", "duration_s"],
+  "additionalProperties": true,
+  "properties": {
+    "ts": { "type": "string" },
+    "label": { "type": "string" },
+    "command": { "type": "string" },
+    "cmd_sha256": { "type": "string" },
+    "exit": { "type": "integer" },
+    "duration_s": { "type": "number" },
+    "commit": { "type": "string" },
+    "dirty": { "type": "boolean" },
+    "wtree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "log_path": { "type": "string" },
+    "node": { "type": "string" }
+  }
+}

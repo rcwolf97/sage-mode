@@ -1,0 +1,9 @@
+{
+  "name": "api",
+  "checks": [
+    { "id": "suite", "command": "${verify.tests}", "required": true },
+    { "id": "contract", "kind": "api-contract", "required": true },
+    { "id": "migrations", "kind": "migration-safety", "required": true },
+    { "id": "errors", "kind": "error-path-coverage", "required": true }
+  ]
+}

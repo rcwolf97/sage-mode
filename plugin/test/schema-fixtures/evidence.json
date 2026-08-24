@@ -1,0 +1,9 @@
+{
+  "ts": "2026-08-21T14:19:03Z",
+  "label": "tests",
+  "command": "pnpm test",
+  "cmd_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "exit": 0,
+  "duration_s": 1.2,
+  "wtree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+}

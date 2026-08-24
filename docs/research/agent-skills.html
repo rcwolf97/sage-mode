@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent-skills · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>agent-skills</h1>
+    <div class="sub">Addy Osmani — Google SDLC practice, encoded as prompts</div>
+  </div>
+  <p>A markdown-based process-enforcement library that wraps Claude Code (and 10+ other agent harnesses) in a Google-flavored senior-engineer SDLC — specs, TDD, five-axis review, and a parallel-fan-out ship gate — delivered as skills, personas, slash commands, and a handful of bash hooks.</p>
+<p>Repo: https://github.com/addyosmani/agent-skills
+Commit: <code>df1edb2</code>
+Date analyzed: 2026-08-21</p>
+<h2 id="tldr">TL;DR</h2>
+<ul>
+<li>24 skills (23 lifecycle + 1 meta), 4 agent personas, 8 slash commands (mirrored across <code>.claude/</code>, <code>.gemini/</code>, <code>commands/</code>), 5 hook scripts — all markdown/bash, no runtime code except the eval harness and validators.</li>
+<li>The real product is discipline-as-prompt: every skill ships a "Common Rationalizations" table (excuse → rebuttal) and a "Red Flags" list, designed to stop an agent talking itself out of a step.</li>
+<li>Enforcement is almost entirely textual, not mechanical — the two exceptions, <code>sdd-cache-{pre,post}.sh</code> and <code>simplify-ignore.sh</code>, are <strong>opt-in</strong> and require manual <code>.claude/settings.json</code> wiring; only <code>SessionStart</code> (injecting the meta-skill) ships wired by default.</li>
+<li><code>/ship</code> is the one endorsed multi-agent pattern (parallel fan-out of <code>code-reviewer</code> + <code>security-auditor</code> + <code>test-engineer</code>, merged by the main session); an explicit anti-pattern catalog bans persona-calls-persona and router personas.</li>
+<li>Self-referential CI: a three-tier eval system (structural validators, TF-IDF trigger/routing evals with an 80% rank-1 floor, optional behavioral graded runs) checks the skills' own descriptions still route correctly.</li>
+</ul>
+<h2 id="inventory">Inventory</h2>
+<p><strong>Skills</strong> — from <code>find /root/repos/agent-skills -name 'SKILL.md' -not -path '*/.git/*'</code> → 24 files, one per <code>skills/&lt;name&gt;/</code> directory.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Path</th>
+<th>What it does</th>
+<th>When it fires</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>using-agent-skills</td>
+<td>skills/using-agent-skills/</td>
+<td>Meta-skill: discovery flowchart + 6 operating behaviors (assumptions, confusion, pushback, simplicity, scope, verify)</td>
+<td>Session start (auto-injected)</td>
+</tr>
+<tr>
+<td>interview-me</td>
+<td>skills/interview-me/</td>
+<td>One-question-at-a-time interrogation to ~95% confidence</td>
+<td>Underspecified ask; "interview me"</td>
+</tr>
+<tr>
+<td>idea-refine</td>
+<td>skills/idea-refine/</td>
+<td>Structured divergent/convergent ideation</td>
+<td>Vague concept needing exploration</td>
+</tr>
+<tr>
+<td>spec-driven-development</td>
+<td>skills/spec-driven-development/</td>
+<td>Gated SPECIFY→PLAN→TASKS→IMPLEMENT, Phase 0 capability-map for multi-capability asks; 6-section spec</td>
+<td>New project/feature, no spec yet</td>
+</tr>
+<tr>
+<td>planning-and-task-breakdown</td>
+<td>skills/planning-and-task-breakdown/</td>
+<td>Decompose spec into small ordered tasks with acceptance criteria</td>
+<td>Spec exists, need units</td>
+</tr>
+<tr>
+<td>incremental-implementation</td>
+<td>skills/incremental-implementation/</td>
+<td>Vertical-slice implement→test→verify→commit loop; flags, safe defaults</td>
+<td>Any multi-file change</td>
+</tr>
+<tr>
+<td>test-driven-development</td>
+<td>skills/test-driven-development/</td>
+<td>RED-GREEN-REFACTOR, Prove-It bug pattern, test pyramid 80/15/5, DAMP-over-DRY, Beyoncé Rule</td>
+<td>Implementing/fixing/changing behavior</td>
+</tr>
+<tr>
+<td>context-engineering</td>
+<td>skills/context-engineering/</td>
+<td>Rules files, context packing, MCP integration</td>
+<td>Session start, task switch, quality drop</td>
+</tr>
+<tr>
+<td>source-driven-development</td>
+<td>skills/source-driven-development/</td>
+<td>DETECT→FETCH→IMPLEMENT→CITE against official docs</td>
+<td>Want source-cited framework code</td>
+</tr>
+<tr>
+<td>doubt-driven-development</td>
+<td>skills/doubt-driven-development/</td>
+<td>CLAIM→EXTRACT→DOUBT→RECONCILE→STOP adversarial review, optional cross-model</td>
+<td>High stakes / unfamiliar code</td>
+</tr>
+<tr>
+<td>frontend-ui-engineering</td>
+<td>skills/frontend-ui-engineering/</td>
+<td>Component architecture, design systems, state, WCAG 2.1 AA</td>
+<td>Building/modifying UI</td>
+</tr>
+<tr>
+<td>api-and-interface-design</td>
+<td>skills/api-and-interface-design/</td>
+<td>Contract-first design, Hyrum's Law, One-Version Rule</td>
+<td>Designing APIs/module boundaries</td>
+</tr>
+<tr>
+<td>browser-testing-with-devtools</td>
+<td>skills/browser-testing-with-devtools/</td>
+<td>Chrome DevTools MCP live runtime verification</td>
+<td>Anything browser-facing</td>
+</tr>
+<tr>
+<td>debugging-and-error-recovery</td>
+<td>skills/debugging-and-error-recovery/</td>
+<td>reproduce→localize→reduce→fix→guard; stop-the-line rule</td>
+<td>Tests/builds fail</td>
+</tr>
+<tr>
+<td>code-review-and-quality</td>
+<td>skills/code-review-and-quality/</td>
+<td>Five-axis review, change sizing (~100 lines), severity labels</td>
+<td>Before merging any change</td>
+</tr>
+<tr>
+<td>code-simplification</td>
+<td>skills/code-simplification/</td>
+<td>Chesterton's Fence, Rule of 500, complexity reduction</td>
+<td>Code harder than it should be</td>
+</tr>
+<tr>
+<td>security-and-hardening</td>
+<td>skills/security-and-hardening/</td>
+<td>OWASP Top 10, auth, secrets, dependency audit, boundary tiers</td>
+<td>Untrusted input, auth, storage</td>
+</tr>
+<tr>
+<td>performance-optimization</td>
+<td>skills/performance-optimization/</td>
+<td>Measure-first, Core Web Vitals, profiling, bundle analysis</td>
+<td>Perf requirements/regressions</td>
+</tr>
+<tr>
+<td>git-workflow-and-versioning</td>
+<td>skills/git-workflow-and-versioning/</td>
+<td>Trunk-based dev, atomic commits, semver/changelog</td>
+<td>Any code change (always)</td>
+</tr>
+<tr>
+<td>ci-cd-and-automation</td>
+<td>skills/ci-cd-and-automation/</td>
+<td>Shift Left, feature flags, quality-gate pipelines</td>
+<td>Build/deploy pipeline work</td>
+</tr>
+<tr>
+<td>deprecation-and-migration</td>
+<td>skills/deprecation-and-migration/</td>
+<td>Code-as-liability, compulsory vs advisory deprecation</td>
+<td>Removing/migrating/sunsetting</td>
+</tr>
+<tr>
+<td>documentation-and-adrs</td>
+<td>skills/documentation-and-adrs/</td>
+<td>ADRs, API docs, "document the why"</td>
+<td>Architectural decisions, shipping</td>
+</tr>
+<tr>
+<td>observability-and-instrumentation</td>
+<td>skills/observability-and-instrumentation/</td>
+<td>Structured logging, RED metrics, OTel tracing, alerting</td>
+<td>Adding telemetry, shipping to prod</td>
+</tr>
+<tr>
+<td>shipping-and-launch</td>
+<td>skills/shipping-and-launch/</td>
+<td>Pre-launch checklist, flag lifecycle, rollback</td>
+<td>Preparing to deploy</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Agents</strong> (<code>agents/*.md</code>, 4 files) — each has a mandatory "Composition" block stating invoke-directly / invoke-via / do-not-invoke-from-persona.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Role</th>
+<th>Model</th>
+<th>Tools/notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>code-reviewer</td>
+<td>Senior Staff Engineer</td>
+<td>not pinned (docs suggest Sonnet)</td>
+<td>Five-dimension review, Critical/Important/Suggestion, output template</td>
+</tr>
+<tr>
+<td>security-auditor</td>
+<td>Security Engineer</td>
+<td>not pinned (docs suggest Opus)</td>
+<td>STRIDE from trust boundaries, OWASP Top 10 + LLM Top 10</td>
+</tr>
+<tr>
+<td>test-engineer</td>
+<td>QA Engineer</td>
+<td>not pinned (docs suggest Haiku)</td>
+<td>Prove-It pattern, test-level decision tree, coverage-gap report</td>
+</tr>
+<tr>
+<td>web-performance-auditor</td>
+<td>Web Performance Engineer</td>
+<td>not pinned</td>
+<td>Quick mode (source scan only) vs Deep mode (Lighthouse/CrUX/DevTools MCP); Metric-Honesty Rule forbids fabricated CWV numbers</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Commands</strong> (<code>.claude/commands/</code>, 8 files, mirrored in <code>.gemini/commands/</code> and <code>commands/</code> as <code>.toml</code>)</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/spec</td>
+<td>Invokes spec-driven-development; six-area spec saved to SPEC.md</td>
+</tr>
+<tr>
+<td>/plan</td>
+<td>Invokes planning-and-task-breakdown; plan → tasks/plan.md, todo → tasks/todo.md</td>
+</tr>
+<tr>
+<td>/build</td>
+<td>Invokes incremental-implementation + test-driven-development; default = one task, <code>auto</code>/<code>all</code> = whole plan with a single human approval gate</td>
+</tr>
+<tr>
+<td>/test</td>
+<td>TDD workflow / Prove-It pattern for bugs</td>
+</tr>
+<tr>
+<td>/review</td>
+<td>Single-perspective five-axis review</td>
+</tr>
+<tr>
+<td>/code-simplify</td>
+<td>code-simplification workflow, tests re-run after every simplification</td>
+</tr>
+<tr>
+<td>/webperf</td>
+<td>Spawns web-performance-auditor subagent, Quick/Deep mode selection</td>
+</tr>
+<tr>
+<td>/ship</td>
+<td>Parallel fan-out: code-reviewer + security-auditor + test-engineer spawned in one turn, merged by main session into GO/NO-GO + rollback plan; skip-fan-out only allowed for ≤2 files, &lt;50 lines, no auth/payments/data/config touch</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Hooks</strong> (<code>hooks/</code>, 5 scripts + <code>hooks.json</code> + 2 doc files)</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Event</th>
+<th>What it enforces</th>
+<th>Wired by default?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SessionStart (<code>session-start.sh</code>, registered in <code>hooks/hooks.json</code>)</td>
+<td>Injects the full <code>using-agent-skills</code> meta-skill body as <code>additionalContext</code> into every new session</td>
+<td>Yes — the only hook in <code>hooks.json</code></td>
+</tr>
+<tr>
+<td>PreToolUse <code>WebFetch</code> (<code>sdd-cache-pre.sh</code>)</td>
+<td>Blocks a WebFetch (exit 2) and returns cached content only if the origin confirms HTTP 304 via <code>If-None-Match</code>/<code>If-Modified-Since</code>; no TTL, no cache without an ETag/Last-Modified validator</td>
+<td>No — manual <code>.claude/settings.json</code> addition per <code>hooks/SDD-CACHE.md</code></td>
+</tr>
+<tr>
+<td>PostToolUse <code>WebFetch</code> (<code>sdd-cache-post.sh</code>)</td>
+<td>Stores <code>{url, prompt, etag, last_modified, content, fetched_at}</code> in <code>.claude/sdd-cache/&lt;sha256(url)[:32]&gt;.json</code>; issues an extra HEAD request to capture validators since Claude Code doesn't expose them</td>
+<td>No — same as above</td>
+</tr>
+<tr>
+<td>PreToolUse <code>Read</code> / PostToolUse <code>Edit\|Write</code> / <code>Stop</code> (<code>simplify-ignore.sh</code>)</td>
+<td>Replaces <code>/* simplify-ignore-start[: reason] */ ... simplify-ignore-end */</code>-fenced code with <code>BLOCK_&lt;hash&gt;</code> placeholders before the model reads the file, and expands them back after edits, restoring originals on session Stop — makes annotated code literally invisible to <code>/code-simplify</code></td>
+<td>No — manual <code>.claude/settings.json</code> addition per <code>hooks/SIMPLIFY-IGNORE.md</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="the-core-engineering-flow">The core engineering flow</h2>
+<p>The repo's own README diagram: <code>DEFINE → PLAN → BUILD → VERIFY → REVIEW → SHIP</code> mapped to <code>/spec /plan /build /test /review /ship</code> (plus <code>/code-simplify</code> and <code>/webperf</code> as review-phase specialists). Reconstructing the artifact chain from the skill/command bodies:</p>
+<ol>
+<li><strong>interview-me / idea-refine</strong> (optional, pre-spec) — clarify intent; no artifact yet, just confidence.</li>
+<li><strong><code>/spec</code> → spec-driven-development</strong> — Phase 0 capability map if the ask bundles multiple capabilities → <code>SPEC.md</code> (Objective, Commands, Structure, Code Style, Testing Strategy, Boundaries). Human approves before Phase 2.</li>
+<li><strong><code>/plan</code> → planning-and-task-breakdown</strong> — reads <code>SPEC.md</code>, produces <code>tasks/plan.md</code> (dependency-ordered) and <code>tasks/todo.md</code> (acceptance criteria + verify step). Plan-mode only, no edits.</li>
+<li><strong><code>/build</code> → incremental-implementation + test-driven-development</strong> — per task: RED → GREEN → full suite → build → commit. <code>/build auto</code> needs a clean git baseline and one explicit approval of the whole plan, then runs every task's loop unattended, stopping only for irreversible/high-risk tasks (→ doubt-driven-development) or unfixable failures (→ debugging-and-error-recovery).</li>
+<li><strong>doubt-driven-development runs in-flight during step 4</strong> on any non-trivial decision — spawns a fresh-context adversarial reviewer with ARTIFACT+CONTRACT only (never the CLAIM), classifies findings, loops ≤3 times.</li>
+<li><strong><code>/test</code></strong> — Prove-It pattern is the local TDD loop, feeding the same passing-suite artifact forward.</li>
+<li><strong><code>/review</code> → code-review-and-quality</strong> — produces a categorized review (Critical/Important/Suggestion) across five axes; <code>/code-simplify</code> optionally follows, re-testing after each simplification.</li>
+<li><strong><code>/webperf</code> → web-performance-auditor</strong> (web apps only) — Deep mode (Lighthouse/CrUX/DevTools-MCP) or Quick mode (source only); scorecard forbids fabricated metrics.</li>
+<li><strong><code>/ship</code> → shipping-and-launch, fan-out</strong> — <code>code-reviewer</code> + <code>security-auditor</code> + <code>test-engineer</code> in parallel on the same diff; main session merges into <code>GO | NO-GO</code> + mandatory rollback plan; any Critical finding defaults to NO-GO.</li>
+<li><strong>git-workflow-and-versioning / documentation-and-adrs / observability-and-instrumentation / deprecation-and-migration</strong> run alongside as ship-phase hygiene, each producing its own artifact.</li>
+</ol>
+<pre class="mermaid">flowchart LR
+    A[User intent] -->|interview-me / idea-refine| B[Clarified ask]
+    B -->|spec-driven-development /spec| C[SPEC.md]
+    C -->|planning-and-task-breakdown /plan| D[tasks/plan.md + tasks/todo.md]
+    D -->|incremental-implementation + TDD /build| E[Passing tests + commits]
+    E -.doubt-driven-development in-flight.-> E
+    E -->|code-review-and-quality /review| F[Categorized review]
+    F -->|code-simplification /code-simplify| F
+    F -->|web-performance-auditor /webperf, web apps only| F
+    F -->|shipping-and-launch /ship fan-out| G{code-reviewer + security-auditor + test-engineer}
+    G -->|main session merge| H[GO/NO-GO + rollback plan]
+    H --> I[Deployed feature]
+</pre>
+<h2 id="core-beliefs-principles">Core beliefs / principles</h2>
+<ul>
+<li><strong>Tests are proof, not decoration.</strong> <code>skills/test-driven-development/SKILL.md</code>: <code>"Tests are proof — 'seems right' is not done."</code></li>
+<li><strong>Confidence is not correctness.</strong> <code>skills/doubt-driven-development/SKILL.md</code>: <code>"A confident answer is not a correct one... a fresh-context reviewer — biased to disprove, not approve — before any non-trivial output stands."</code></li>
+<li><strong>Orchestration belongs to the user, never a persona.</strong> <code>AGENTS.md</code>: <code>"the user (or a slash command) is the orchestrator. Personas do not invoke other personas."</code></li>
+<li><strong>A spec is the cure for silent assumptions.</strong> <code>skills/spec-driven-development/SKILL.md</code>: <code>"Code without a spec is guessing."</code></li>
+<li><strong>Simplicity is mandatory.</strong> <code>skills/using-agent-skills/SKILL.md</code>: <code>"If you build 1000 lines and 100 would suffice, you have failed."</code></li>
+<li><strong>Sycophancy is a named failure mode.</strong> <code>skills/using-agent-skills/SKILL.md</code>: <code>"'Of course!' followed by implementing a bad idea helps no one."</code></li>
+<li><strong>Review approves progress, not perfection.</strong> <code>skills/code-review-and-quality/SKILL.md</code>: <code>"Approve a change when it definitely improves overall code health, even if it isn't perfect."</code></li>
+<li><strong>Refactors must remove concepts, not relocate them.</strong> <code>skills/code-review-and-quality/SKILL.md</code>: <code>"Relocating complexity isn't reducing it... look for the version where branches disappear."</code></li>
+<li><strong>Metrics without measurement are fabrication.</strong> <code>agents/web-performance-auditor.md</code>: <code>"Never fabricate metrics... Violating this rule is worse than returning no scorecard at all."</code></li>
+<li><strong>Code is a liability.</strong> README explicitly cites Google's engineering-practices lineage: Hyrum's Law, the Beyoncé Rule, trunk-based dev, Shift Left, Chesterton's Fence.</li>
+</ul>
+<h2 id="mechanics-worth-stealing">Mechanics worth stealing</h2>
+<ul>
+<li><strong>Anti-rationalization tables as the load-bearing artifact.</strong> Every skill maps excuse → rebuttal, e.g. <code>test-driven-development</code>: <code>"I tested it manually" → "Manual testing doesn't persist. Tomorrow's change might break it with no way to know."</code> A cheap, reusable pattern for any prompt meant to survive an agent's shortcut-seeking under pressure — put the objection and its counter in the prompt instead of hoping the instruction alone holds.</li>
+<li><strong>"NOTICED BUT NOT TOUCHING" scope-discipline escape valve.</strong> <code>skills/incremental-implementation/SKILL.md</code> gives agents a way to log out-of-scope observations instead of silently fixing or silently ignoring them: <code>NOTICED BUT NOT TOUCHING: src/utils/format.ts has an unused import (unrelated) → Want me to create a task?</code></li>
+<li><strong>ARTIFACT + CONTRACT, never CLAIM, to the reviewer.</strong> <code>doubt-driven-development</code>'s anti-sycophancy trick: strip your own conclusion before handing work to a fresh-context reviewer, because <em>"if you hand over conclusions, you'll get back validation of your conclusions."</em> Reusable for any self-review loop.</li>
+<li><strong>Freshness-honest caching via HTTP validators, not TTL.</strong> <code>hooks/sdd-cache-pre.sh</code>/<code>-post.sh</code> serve cache only after a live <code>304 Not Modified</code> revalidation; entries without <code>ETag</code>/<code>Last-Modified</code> are never cached. A pattern for an agent-safe cache that can't silently go stale.</li>
+<li><strong>Making code invisible instead of asking the model to ignore it.</strong> <code>hooks/simplify-ignore.sh</code> swaps annotated blocks for content-addressed <code>BLOCK_&lt;hash&gt;</code> placeholders on <code>Read</code>, restoring them on <code>Stop</code> — a hard technical guarantee in place of a soft instruction.</li>
+<li><strong>Explicit orchestration anti-pattern catalog.</strong> <code>references/orchestration-patterns.md</code> names four failure classes (router persona, persona-calls-persona, paraphrasing orchestrator, deep persona trees), each with why it degrades output — a design checklist before any multi-agent feature.</li>
+<li><strong>TF-IDF trigger-collision testing for a prompt catalog.</strong> <code>evals/README.md</code>: Tier 2 computes stemmed TF-IDF over descriptions, asserts rank-1 ≥80%, flags ≥50%/≥75% pairwise similarity — a deterministic, free CI check for "will my new skill get picked over an existing one."</li>
+<li><strong>Single approval gate for autonomy.</strong> <code>/build auto</code>: one unambiguous human "go," then the agent runs the whole task list unattended but still commits per-task and stops on irreversible/high-risk work.</li>
+</ul>
+<h2 id="weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</h2>
+<ul>
+<li><strong>Enforcement is almost entirely textual.</strong> Outside SessionStart injection, nothing stops an agent from skipping a skill; the two hooks that enforce anything (<code>sdd-cache</code>, <code>simplify-ignore</code>) require hand-editing <code>.claude/settings.json</code> and ship unwired. No hook blocks a commit without tests, blocks <code>/ship</code> without a green suite, or verifies a spec exists before <code>/build</code> — the <code>/build auto</code> spec-file check is prose the agent is trusted to follow.</li>
+<li><strong>The whole system is a very large system prompt.</strong> <code>using-agent-skills</code> alone is injected in full at every session start; 24 skills average ~370 lines, and <code>docs/skill-anatomy.md</code>'s own "under 500 lines" guidance is already brushed by <code>security-and-hardening</code> (499). Nothing prevents multiple long skills stacking in one session.</li>
+<li><strong>The eval system tests routing, not correctness.</strong> <code>evals/README.md</code> admits Tier 2 is "a lexical approximation of routing... it cannot judge semantics." Behavioral Tier 3 is opt-in and token-costed, so the CI-guaranteed floor is "the right skill's name gets mentioned," not "the workflow was followed correctly."</li>
+<li><strong><code>doubt-driven-development</code> and <code>/ship</code> assume subagent isolation</strong> that Claude Code provides but other harnesses don't uniformly offer — the "degraded self-questioning fallback" for doubt-driven admits it "is not fresh-context review."</li>
+<li><strong>No mechanical guarantee against scope creep or dead-code accumulation</strong> — <code>incremental-implementation</code> and <code>code-review-and-quality</code> both rely on the agent noticing and asking, not any static check.</li>
+<li><strong>Heavy self-referential overhead.</strong> CONTRIBUTING pre-flight checks, <code>evals/</code>, <code>scripts/validate-*.js</code>, and skill-anatomy rules exist to maintain the pack itself — irrelevant baggage if vendored wholesale into an unrelated project.</li>
+<li><strong>Persona model assignments are aspirational, not pinned.</strong> <code>references/orchestration-patterns.md</code> suggests Haiku for <code>test-engineer</code>, Opus for <code>security-auditor</code>, but <code>agents/*.md</code> frontmatter carries no <code>model:</code> field — cost optimization is documented, not applied.</li>
+</ul>
+<h2 id="fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</h2>
+<p><strong>Carries over well:</strong> the Prove-It bug-fix pattern, vertical-slicing discipline, the five-axis review checklist as a self-review pass, and ~100-line commit sizing are all immediately useful without any multi-agent machinery — good habits encoded as prompts for a single session. <code>/ship</code>'s fan-out is genuinely valuable for a solo engineer specifically because it substitutes for the second-pair-of-eyes a team would normally provide.</p>
+<p><strong>Pure overhead for a one-day push:</strong> the gated four-phase spec workflow with Phase 0 capability maps, <code>doubt-driven-development</code>'s cross-model escalation machinery, <code>deprecation-and-migration</code>, ADR discipline, and the entire eval/validator apparatus are built for a team maintaining a long-lived shared prompt library, not shipping one feature fast. Installing the whole plugin injects the ~190-line meta-skill at every session start regardless of task size — cherry-picking <code>test-driven-development</code>, <code>incremental-implementation</code>, and <code>code-review-and-quality</code> (or just <code>/build</code> → <code>/review</code>) captures most of the value at a fraction of the context cost.</p>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#tldr">TL;DR</a><a href="#inventory">Inventory</a><a href="#the-core-engineering-flow">The core engineering flow</a><a href="#core-beliefs-principles">Core beliefs / principles</a><a href="#mechanics-worth-stealing">Mechanics worth stealing</a><a href="#weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</a><a href="#fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gstack · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html">Design</a><a href="../research/overview.html" class="on">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Research</div>
+    <h1>gstack</h1>
+    <div class="sub">Garry Tan — simulate the whole org, boil the ocean</div>
+  </div>
+  <p>Garry Tan's opinionated Claude Code skill-suite that turns a solo builder into a simulated engineering org (CEO, eng manager, designer, QA, security, release engineer) via ~53 Markdown-defined slash commands plus a compiled headless-browser daemon.</p>
+<p>Repo: https://github.com/garrytan/gstack
+Commit analyzed: <code>51932ec</code> (2026-08-19)
+Date analyzed: 2026-08-21</p>
+<h2 id="tldr">TL;DR</h2>
+<ul>
+<li>Not a framework, a <strong>process</strong>: <code>office-hours → plan-*-review → build → review → ship → land-and-deploy → retro</code>, encoded as 54 SKILL.md units (one is the repo-root router; 53 are invokable commands).</li>
+<li>Every skill is generated from a <code>.tmpl</code> at build time (<code>gen-skill-docs.ts</code>); a shared ~800-line boilerplate preamble (telemetry, AskUserQuestion contract, ETHOS injection, gbrain context load) is the biggest single engineering investment in the repo — bigger than most skills' unique logic.</li>
+<li>Quality gates are real: an <code>Agent</code>-tool "review army" of scope-gated specialist subagents (testing, maintainability, security, performance, data-migration, api-contract, red-team, design) produces confidence-scored, fingerprint-deduped findings; <code>/cso</code> runs a 14-phase OWASP+STRIDE audit; <code>/careful</code>/<code>/freeze</code>/<code>/guard</code> are Claude Code hooks, not prompts.</li>
+<li>ETHOS.md is explicit and load-bearing: <strong>Boil the Ocean</strong> (AI made completeness cheap, so do the whole thing), <strong>Search Before Building</strong> (three layers of knowledge), <strong>User Sovereignty</strong> (AI recommends, human decides — never act on cross-model agreement alone).</li>
+<li>Heavy coupling to Garry Tan's own stack: Bun, a compiled Playwright/Chromium daemon, gbrain (his other project), Supabase telemetry, Conductor for parallel sessions, and a "10-15 parallel sprints" workflow that assumes supervision bandwidth most solo engineers don't have.</li>
+</ul>
+<h2 id="inventory">Inventory</h2>
+<p>53 command units + 1 root router, from <code>find /root/repos/gstack -maxdepth 2 -iname SKILL.md | grep -v tmpl</code> (54 files), grouped by lifecycle phase. Descriptions from each unit's frontmatter + body.</p>
+<h3 id="plan">Plan</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>Path</th>
+<th>What it does</th>
+<th>Fires on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>office-hours</td>
+<td><code>office-hours/</code></td>
+<td>Six forcing questions (demand reality, status quo, specificity, narrowest wedge, observation, future-fit) in Startup mode, design brainstorm in Builder mode; writes a design doc</td>
+<td>"brainstorm this", pre-plan</td>
+</tr>
+<tr>
+<td>plan-ceo-review</td>
+<td><code>plan-ceo-review/</code></td>
+<td>CEO persona, 4 scope modes (Expansion/Selective/Hold/Reduction), 18 cognitive patterns (Bezos doors, Munger inversion)</td>
+<td><code>/plan-ceo-review</code></td>
+</tr>
+<tr>
+<td>plan-eng-review</td>
+<td><code>plan-eng-review/</code></td>
+<td>Eng-manager persona; locks architecture/diagrams/error map/test matrix, 15 cognitive patterns</td>
+<td><code>/plan-eng-review</code></td>
+</tr>
+<tr>
+<td>plan-design-review</td>
+<td><code>plan-design-review/</code></td>
+<td>Rates each design dimension 0-10 vs. "what a 10 looks like"; AI-slop detection</td>
+<td><code>/plan-design-review</code></td>
+</tr>
+<tr>
+<td>plan-devex-review</td>
+<td><code>plan-devex-review/</code></td>
+<td>TTHW benchmarking, magical-moment design, friction tracing, 3 modes</td>
+<td><code>/plan-devex-review</code></td>
+</tr>
+<tr>
+<td>autoplan</td>
+<td><code>autoplan/</code></td>
+<td>Chains CEO→Design→Eng→DX, auto-answers via 6 decision principles, surfaces only taste/"user challenge" calls</td>
+<td><code>/autoplan</code></td>
+</tr>
+<tr>
+<td>design-consultation</td>
+<td><code>design-consultation/</code></td>
+<td>Full design system from scratch, writes <code>DESIGN.md</code></td>
+<td>new project</td>
+</tr>
+<tr>
+<td>spec</td>
+<td><code>spec/</code></td>
+<td>5-phase intent→executable spec; Codex gate blocks &lt;7/10; fail-closed secret redaction</td>
+<td>filing a spec/issue</td>
+</tr>
+<tr>
+<td>plan-tune</td>
+<td><code>plan-tune/</code></td>
+<td>Self-tunes AskUserQuestion sensitivity per question id; builder psychographic</td>
+<td>background</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="build-operate">Build / operate</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>Path</th>
+<th>What it does</th>
+<th>Fires on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>investigate</td>
+<td><code>investigate/</code></td>
+<td>Root-cause debugging; "no fixes without investigation"; auto-freezes scope; stops after 3 failed fixes</td>
+<td>bug reports</td>
+</tr>
+<tr>
+<td>qa / qa-only</td>
+<td><code>qa/</code>, <code>qa-only/</code></td>
+<td>Real Chromium, clicks flows, fixes bugs + regression tests (<code>qa</code>) or reports only (<code>qa-only</code>)</td>
+<td><code>/qa &lt;url&gt;</code></td>
+</tr>
+<tr>
+<td>browse</td>
+<td><code>browse/</code></td>
+<td>Headless-Chromium CLI/daemon (<code>$B</code> commands: snapshot, click, fill, screenshot, cdp)</td>
+<td>any browser-needing skill</td>
+</tr>
+<tr>
+<td>open-gstack-browser</td>
+<td><code>open-gstack-browser/</code></td>
+<td>Headed, branded, anti-bot-stealth Chromium + sidebar agent</td>
+<td>interactive browsing</td>
+</tr>
+<tr>
+<td>setup-browser-cookies</td>
+<td><code>setup-browser-cookies/</code></td>
+<td>Imports cookies from the user's real browser</td>
+<td>authenticated testing</td>
+</tr>
+<tr>
+<td>pair-agent</td>
+<td><code>pair-agent/</code></td>
+<td>Shares one browser across AI agents via scoped tokens/tab isolation</td>
+<td>multi-agent coordination</td>
+</tr>
+<tr>
+<td>scrape / skillify</td>
+<td><code>scrape/</code>, <code>skillify/</code></td>
+<td>Prototype-then-codify page extraction; freezes a successful flow into a reusable skill</td>
+<td>one-off / codified scraping</td>
+</tr>
+<tr>
+<td>design-shotgun</td>
+<td><code>design-shotgun/</code></td>
+<td>4-6 GPT-Image mockup variants, comparison board, persisted taste memory</td>
+<td>visual exploration</td>
+</tr>
+<tr>
+<td>design-html</td>
+<td><code>design-html/</code></td>
+<td>Mockup → production HTML/CSS via "Pretext" computed-layout, framework-aware</td>
+<td>after shotgun/CEO plan</td>
+</tr>
+<tr>
+<td>codex</td>
+<td><code>codex/</code></td>
+<td>OpenAI Codex CLI wrapper: pass/fail gate, adversarial challenge, open consult</td>
+<td>cross-model second opinion</td>
+</tr>
+<tr>
+<td>ios-qa</td>
+<td><code>ios-qa/</code></td>
+<td>Drives a real iPhone over USB CoreDevice via embedded StateServer; optional Tailscale</td>
+<td>live-device iOS testing</td>
+</tr>
+<tr>
+<td>ios-fix / ios-design-review / ios-clean / ios-sync</td>
+<td>4 dirs</td>
+<td>Autonomous fix loop; 10-dim HIG audit; strip debug bridge pre-release; regen bridge</td>
+<td>iOS workflow</td>
+</tr>
+<tr>
+<td>careful</td>
+<td><code>careful/</code></td>
+<td>PreToolUse hook: warns/hard-denies destructive shell commands</td>
+<td>"be careful"</td>
+</tr>
+<tr>
+<td>freeze / guard / unfreeze</td>
+<td>3 dirs</td>
+<td>PreToolUse hook locks Edit/Write to one directory; <code>guard</code>=careful+freeze; <code>unfreeze</code> clears it</td>
+<td>scoped debugging</td>
+</tr>
+<tr>
+<td>context-save / context-restore</td>
+<td>2 dirs</td>
+<td>Persist/resume git state + decisions, across Conductor workspaces</td>
+<td>context switches</td>
+</tr>
+<tr>
+<td>learn</td>
+<td><code>learn/</code></td>
+<td>Review/search/prune/export cross-session project learnings (JSONL)</td>
+<td>memory management</td>
+</tr>
+<tr>
+<td>diagram / make-pdf</td>
+<td>2 dirs</td>
+<td>English→mermaid+<code>.excalidraw</code>+SVG/PNG triplet; Markdown→PDF/HTML/DOCX</td>
+<td>diagramming, publishing</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="review">Review</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>Path</th>
+<th>What it does</th>
+<th>Fires on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>review</td>
+<td><code>review/</code></td>
+<td>2-pass checklist + specialist subagent army + adaptive gating + cross-review dedup of previously-skipped findings</td>
+<td><code>/review</code>, inline in <code>/ship</code></td>
+</tr>
+<tr>
+<td>design-review</td>
+<td><code>design-review/</code></td>
+<td>Live-site visual audit + atomic-commit fixes + before/after screenshots</td>
+<td>live audit</td>
+</tr>
+<tr>
+<td>devex-review</td>
+<td><code>devex-review/</code></td>
+<td>Live DX audit: real docs, timed TTHW, screenshots errors; compares vs. <code>plan-devex-review</code>'s prediction</td>
+<td>post-ship DX check</td>
+</tr>
+<tr>
+<td>cso</td>
+<td><code>cso/</code></td>
+<td>14-phase OWASP+STRIDE audit (secrets, supply chain, CI/CD, infra, webhooks, LLM/AI security...); independent per-finding verification</td>
+<td><code>/cso</code></td>
+</tr>
+<tr>
+<td>health</td>
+<td><code>health/</code></td>
+<td>Type checker + linter + tests + dead code dashboard</td>
+<td>periodic</td>
+</tr>
+<tr>
+<td>benchmark / benchmark-models</td>
+<td>2 dirs</td>
+<td>Page-load/CWV baseline+diff; cross-model (Claude/GPT/Gemini) skill benchmark</td>
+<td>perf regression, model comparison</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="ship">Ship</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>Path</th>
+<th>What it does</th>
+<th>Fires on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ship</td>
+<td><code>ship/</code></td>
+<td>Automated: sync base, tests, coverage audit, plan-completion check, review army, VERSION/CHANGELOG bump, push, open PR</td>
+<td><code>/ship</code></td>
+</tr>
+<tr>
+<td>land-and-deploy</td>
+<td><code>land-and-deploy/</code></td>
+<td>Merges PR, waits on CI/deploy, verifies prod health; first run is a dry-run</td>
+<td><code>/land-and-deploy</code></td>
+</tr>
+<tr>
+<td>canary</td>
+<td><code>canary/</code></td>
+<td>Post-deploy monitoring loop (console errors, perf, page failures)</td>
+<td>after deploy</td>
+</tr>
+<tr>
+<td>landing-report</td>
+<td><code>landing-report/</code></td>
+<td>Read-only dashboard over the workspace-aware ship queue</td>
+<td>parallel-sprint status</td>
+</tr>
+<tr>
+<td>document-release / document-generate</td>
+<td>2 dirs</td>
+<td>Diffs docs vs. code, updates stale ones, Diataxis coverage map; generates missing docs</td>
+<td>inline in <code>/ship</code>, or standalone</td>
+</tr>
+<tr>
+<td>setup-deploy</td>
+<td><code>setup-deploy/</code></td>
+<td>One-time deploy-platform detection (Fly/Render/Vercel/Heroku)</td>
+<td>before first deploy</td>
+</tr>
+<tr>
+<td>gstack-upgrade</td>
+<td><code>gstack-upgrade/</code></td>
+<td>Self-updates gstack</td>
+<td>version drift</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="learn">Learn</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>Path</th>
+<th>What it does</th>
+<th>Fires on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>retro</td>
+<td><code>retro/</code></td>
+<td>Team-aware weekly retro: per-person breakdowns, shipping streaks, test-health trends</td>
+<td>weekly</td>
+</tr>
+<tr>
+<td>setup-gbrain / sync-gbrain</td>
+<td>2 dirs</td>
+<td>Bootstrap and refresh a persistent cross-session/cross-machine memory store (gbrain)</td>
+<td>onboarding, keeping memory fresh</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="agents-subagent-dispatch-not-static-config-files">Agents — subagent dispatch, not static config files</h3>
+<p>No <code>agents/</code> directory of persona/model/tool YAML exists (<code>agents/openai.yaml</code> is a Codex-plugin manifest, not a roster). The README's "23 specialists" are personas written into each SKILL.md's prompt body. The only literal spawned subagents are generic <code>Agent</code>-tool dispatches — always <code>subagent_type: "general-purpose"</code>, model inherited from the parent session (no per-agent model pin found anywhere) — each carrying one checklist as its prompt:</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Name (checklist file)</th>
+<th>Role</th>
+<th>Model</th>
+<th>Tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>testing, maintainability</td>
+<td><code>review/specialists/*.md</code></td>
+<td>always-on code reviewers (diff ≥50 lines)</td>
+<td>general-purpose (inherited)</td>
+</tr>
+<tr>
+<td>security, performance, data-migration, api-contract</td>
+<td><code>review/specialists/*.md</code></td>
+<td>scope-gated (SCOPE_AUTH/BACKEND/MIGRATIONS/API)</td>
+<td>general-purpose (inherited)</td>
+</tr>
+<tr>
+<td>red-team</td>
+<td><code>review/specialists/red-team.md</code></td>
+<td>finds what other specialists missed; gated on diff&gt;200 lines or a CRITICAL</td>
+<td>general-purpose (inherited)</td>
+</tr>
+<tr>
+<td>design</td>
+<td><code>review/design-checklist.md</code></td>
+<td>scope-gated on SCOPE_FRONTEND</td>
+<td>general-purpose (inherited)</td>
+</tr>
+<tr>
+<td>adversarial / greptile-triage / plan-completion / test-coverage / doc-release</td>
+<td><code>ship/sections/*.md</code></td>
+<td>independent second-pass reviewers, fresh context, dispatched by <code>/ship</code></td>
+<td>general-purpose (inherited)</td>
+</tr>
+<tr>
+<td>CSO finding-verifier</td>
+<td><code>cso/SKILL.md</code></td>
+<td>independent per-finding FP check, blind to the original scan's reasoning</td>
+<td>general-purpose (inherited)</td>
+</tr>
+</tbody>
+</table></div>
+<p>Dispatch pattern is uniform: launch all selected specialists in one message (true parallelism), each gets a fresh context window, findings return as line-delimited JSON, get fingerprinted (<code>path:line:category</code>), deduped (confirmed-by-multiple boosts confidence), and confidence-gated (≥7 shown, 5-6 shown with caveat, 3-4 appendix-only, 1-2 suppressed).</p>
+<h3 id="hooks-hostsclaudehooks">Hooks (<code>hosts/claude/hooks/</code>)</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Event</th>
+<th>File / mechanism</th>
+<th>What it enforces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PreToolUse (Bash)</td>
+<td>careful's hook</td>
+<td>Warns (MEDIUM) or hard-denies (HIGH: <code>rm -r /</code>, force-push to default branch)</td>
+</tr>
+<tr>
+<td>PreToolUse (Edit/Write)</td>
+<td>freeze's hook, shares extractor with careful</td>
+<td>Fail-closed directory boundary; unparseable payload denied; symlinks resolved to target</td>
+</tr>
+<tr>
+<td>PreToolUse (AskUserQuestion)</td>
+<td><code>question-preference-hook.ts</code></td>
+<td>Auto-decides per stored <code>never-ask</code> preference; refuses to guess if ambiguous</td>
+</tr>
+<tr>
+<td>PostToolUse (AskUserQuestion)</td>
+<td><code>question-log-hook.ts</code></td>
+<td>Deterministic answer capture, dedup by tool_use_id, backs <code>/plan-tune</code></td>
+</tr>
+<tr>
+<td>PostToolUse (AUQ error)</td>
+<td><code>auq-error-fallback-hook.ts</code></td>
+<td>On a transport/missing-result error (seen on Conductor), reminds the model to use the prose fallback</td>
+</tr>
+<tr>
+<td>Stop</td>
+<td><code>timeline-stop-hook.ts</code></td>
+<td>Closes dangling <code>"started"</code> timeline entries from interrupted sessions (fail-open, ≤2s, always exits 0)</td>
+</tr>
+<tr>
+<td>Stop (opt-in)</td>
+<td><code>gstack-verify-gate</code> (bin)</td>
+<td>Blocks turn-end until a declared <code>&lt;!-- gstack:verify: --&gt;</code> command passes; needs per-repo trust grant</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="the-core-engineering-flow">The core engineering flow</h2>
+<p><strong>Artifact chain:</strong></p>
+<ol>
+<li><strong><code>/office-hours</code></strong> → <strong>design doc</strong> (<code>~/.gstack/projects/&lt;slug&gt;/*-design-*.md</code>, mirrored to <code>docs/designs/</code>).</li>
+<li><strong><code>/plan-ceo-review</code></strong> reads it, challenges scope in 1 of 4 modes, appends a <code>## CEO Plan</code> section.</li>
+<li><strong><code>/plan-eng-review</code></strong> locks architecture/diagrams/tests, appends <code>## GSTACK REVIEW REPORT</code> — the plan-mode exit gate checks for this before <code>ExitPlanMode</code> is allowed.</li>
+<li><strong><code>/plan-design-review</code></strong> (if frontend) and <strong><code>/plan-devex-review</code></strong> (if API/CLI/SDK) rate and edit the plan toward a 10/10. <strong><code>/autoplan</code></strong> chains all four with the 6 Decision Principles auto-answering everything except premises and cross-model "User Challenges."</li>
+<li>Implementation happens outside any gstack skill, against the locked plan.</li>
+<li><strong><code>/review</code></strong> (standalone or inline in <code>/ship</code> Step 9) diffs vs. base, runs the checklist (SQL/data-safety + LLM trust-boundary as CRITICAL), dispatches the review army, auto-fixes AUTO-FIX findings, batches ASK findings into one AskUserQuestion, loops up to 3 fix-cycles, logs to the <strong>Review Readiness Dashboard</strong>.</li>
+<li><strong><code>/qa</code></strong> drives the real browser against staging, fixes bugs, generates a regression test per fix.</li>
+<li><strong><code>/ship</code></strong> re-runs everything (tests, coverage, plan-completion, review army, adversarial/Codex cross-check, Greptile triage), bumps VERSION/CHANGELOG, auto-invokes <code>/document-release</code>, pushes, opens the PR with review output embedded.</li>
+<li><strong><code>/land-and-deploy</code></strong> merges, waits on CI/deploy, verifies prod health (dry-run explained the first time only).</li>
+<li><strong><code>/canary</code></strong> watches the deploy for console errors/perf regressions; offers a revert on trouble.</li>
+<li><strong><code>/retro</code></strong> rolls the week's timeline/telemetry into a per-person, per-repo report.</li>
+</ol>
+<pre class="mermaid">flowchart TD
+    OH["/office-hours\n→ design doc"] --> CEO["/plan-ceo-review\n→ scope decision"]
+    CEO --> ENG["/plan-eng-review\n→ architecture + tests locked"]
+    ENG --> DES["/plan-design-review\n(if frontend)"]
+    ENG --> DX["/plan-devex-review\n(if API/CLI/SDK)"]
+    DES --> GATE["## GSTACK REVIEW REPORT\nplan-mode exit gate"]
+    DX --> GATE
+    GATE --> IMPL[Implementation]
+    IMPL --> REV["/review\nchecklist + specialist army"]
+    REV --> QA["/qa\nreal browser, fix + regress"]
+    QA --> SHIP["/ship\nre-verify everything, PR"]
+    SHIP --> LAND["/land-and-deploy\nmerge + deploy + verify"]
+    LAND --> CANARY["/canary\npost-deploy watch"]
+    CANARY --> RETRO["/retro\nweekly rollup"]
+
+    AUTOPLAN["/autoplan\n(CEO→Design→Eng→DX,\nauto-decided)"]
+    AUTOPLAN -.replaces.-> CEO
+    AUTOPLAN -.-> DX
+</pre>
+<h2 id="core-beliefs-principles">Core beliefs / principles</h2>
+<ol>
+<li><strong>Boil the Ocean</strong> — completeness is now cheap, ship the whole thing. <em>"When the complete implementation costs minutes more than the shortcut — do the complete thing. Every time."</em> (<code>ETHOS.md</code>)</li>
+<li><strong>Three layers of knowledge before building</strong> — tried-and-true, new-and-popular, first-principles; prize Layer 3. <em>"The best projects both avoid mistakes... while also making brilliant observations that are out of distribution (Layer 3)."</em> (<code>ETHOS.md</code>)</li>
+<li><strong>User Sovereignty overrides model consensus</strong> — <em>"Two AI models agreeing on a change is a strong signal. It is not a mandate... the user is right. Always."</em> (<code>ETHOS.md</code>) — operationalized in <code>autoplan/SKILL.md</code> as the non-auto-decidable "User Challenge" class.</li>
+<li><strong>Zero silent failures, named errors</strong> — <em>"Don't say 'handle errors.' Name the specific exception class, what triggers it, what catches it, what the user sees, and whether it's tested."</em> (<code>plan-eng-review/SKILL.md</code>)</li>
+<li><strong>Stale diagrams are a defect, not neutral</strong> — <em>"Stale diagrams are worse than no diagrams — they actively mislead."</em> (<code>plan-eng-review/SKILL.md</code>)</li>
+<li><strong>The user's words beat the founder's pitch</strong> — <em>"There is almost always a gap between what the founder says the product does and what users say it does."</em> (<code>office-hours/SKILL.md</code>)</li>
+<li><strong>Interest is not demand</strong> — <em>"Waitlists, signups, 'that's interesting' — none of it counts. Behavior counts. Money counts. Panic when it breaks counts."</em> (<code>office-hours/SKILL.md</code>)</li>
+<li><strong>Confidence must be evidenced</strong> — <em>"If you cannot quote the motivating line(s), the finding is unverified. Force its confidence to 4-5... Do not work around this by inventing speculative confidence 7+."</em> (<code>ship/sections/review-army.md</code>)</li>
+<li><strong>The task is the boundary, not license to widen it</strong> (bounded-scope model overlay) — <em>"Interpret 'complete,' 'full,' 'exhaustive'... as complete within that boundary, never as permission to widen it."</em> (<code>model-overlays/gpt-5.6-sol.md</code>) — in direct tension with #1, resolved per-model rather than universally.</li>
+<li><strong>Build for yourself</strong> — <em>"gstack exists because its creator wanted it. Every feature was built because it was needed, not because it was requested."</em> (<code>ETHOS.md</code>)</li>
+</ol>
+<h2 id="mechanics-worth-stealing">Mechanics worth stealing</h2>
+<ul>
+<li><strong>Skeleton + on-demand sections.</strong> Large skills are a short decision-tree with a routing table (<code>| When | Read this section |</code>) into <code>sections/*.md</code> files, read only when triggered — real context-budget discipline, generated from <code>.tmpl</code> so docs can't drift from code (<code>ARCHITECTURE.md</code>).</li>
+<li><strong>Verification-gated confidence.</strong> Findings need <code>path:line</code> plus <em>quoted</em> motivating code before confidence ≥7 is allowed; two specialists hitting the same fingerprint boost each other and get tagged "MULTI-SPECIALIST CONFIRMED." Previously-skipped findings are suppressed on re-review only if the file hasn't changed since (<code>ship/sections/review-army.md</code>).</li>
+<li><strong>AskUserQuestion as a structured decision brief.</strong> Every question carries a plain-English "ELI10," <code>Recommendation: X because Y</code>, per-option <code>Completeness: N/10</code>, minimum-length pros/cons, and a documented fallback chain (native tool → MCP variant → prose) for unreliable hosts.</li>
+<li><strong>Auto-decide with an explicit exception carve-out.</strong> <code>autoplan</code>'s 6 principles auto-answer intermediate questions, but premises and any "User Challenge" (models agreeing the user's stated direction should change) are hard-excluded — User Sovereignty as code, not prose.</li>
+<li><strong>Content-addressed test evidence.</strong> <code>gstack-wtree</code> hashes the working tree, not the commit, so FRESH/STALE grading survives rebases/squashes — <code>/ship</code> cites prior runs instead of re-running suites.</li>
+<li><strong>Physical listener separation over header-based trust.</strong> The browse daemon's tunnel-facing port has no <code>/health</code> or <code>/cookie-picker</code> routes at all, rather than inferring trust from headers on one socket (<code>ARCHITECTURE.md</code>).</li>
+<li><strong>Asymmetric egress policy.</strong> Every off-machine send writes a hash-chained receipt first; sensitive sinks refuse to send if the write fails, user-directed sends fail open with a warning — a deliberate per-sink-class split, not one global rule.</li>
+</ul>
+<h2 id="weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</h2>
+<ul>
+<li><strong>Enormous per-skill token overhead.</strong> <code>office-hours/SKILL.md</code> runs ~1,740 lines before the six forcing questions start; roughly half of every large skill is identical boilerplate (telemetry, gbrain sync, AskUserQuestion contract, checkpoint mode) repeated per skill — big enough that <code>gstack-context-bill</code> exists solely to audit it.</li>
+<li><strong>Deep coupling to one person's stack.</strong> Bun, a compiled Playwright/Chromium daemon, gbrain (a separate private project), Supabase telemetry, and Conductor for the "10-15 parallel sprints" the README frames as the payoff. Adopting the workflow discipline means inheriting all of it.</li>
+<li><strong>"Boil the ocean" is scope-creep pressure by default.</strong> The ethos argues against "ship the shortcut" outright; <code>plan-ceo-review</code>'s "SCOPE EXPANSION" mode and <code>autoplan</code>'s "choose completeness" principle push toward more work, counterbalanced only by a bounded-scope model overlay most models don't get.</li>
+<li><strong>Sprawl.</strong> 53 command units, 88 <code>bin/</code> binaries, a full iOS live-device QA subsystem, a personal knowledge-graph integration, cross-model benchmarking, and browser automation are one install. Most is orthogonal to "review a diff and ship it," yet all of it loads preamble machinery every invocation.</li>
+<li><strong>Assumes near-constant human availability.</strong> Plan reviews, the CSO audit, and User Challenges all block on a human decision-maker; running many parallel sprints (the headline use case) requires the operator reachable across all of them at once — visible via the dashboard, not solved by it.</li>
+<li><strong>Self-referential validation.</strong> Telemetry and "eureka moment" logs feed the same tool that produces the README's productivity claims; no external benchmark shows the review army finds more real bugs than one well-prompted pass would.</li>
+</ul>
+<h2 id="fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</h2>
+<p><strong>Carries over cheaply, without installing gstack:</strong> the AskUserQuestion decision-brief format (ELI10 + recommendation + scored options + pros/cons); the pre-emit verification gate for findings ("quote the line or confidence caps at 4-5"); parallel, fresh-context, checklist-scoped specialist subagents with fingerprinted findings instead of one long review pass; named failure modes over "handle errors"; the skeleton + on-demand-section structure for any prompt library past a few hundred lines.</p>
+<p><strong>Pure overhead for one day, one feature:</strong> the full plan gauntlet (CEO→Eng→Design→DX) is team-sprint scale, not one afternoon — <code>/autoplan</code> reduces but doesn't remove the cost; gbrain/telemetry/egress-receipts/Supabase sync is cross-session/cross-machine memory infrastructure a single day never needs; iOS live-device QA, cross-model benchmarking, and <code>/pair-agent</code> browser sharing apply only if the feature specifically needs them; <code>/retro</code>, <code>/health</code>, <code>/benchmark-models</code> are organizational/longitudinal tooling with no payoff inside one day.</p>
+<p><strong>Net:</strong> the individual mechanics (structured findings, verification-gated confidence, decision briefs, parallel specialist review) are worth lifting into a lighter personal prompt set; the full 53-unit process is built for someone running many parallel sprints with a review culture to enforce. Installing it whole for one feature in one day imports a much bigger machine than the job needs.</p>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#tldr">TL;DR</a><a href="#inventory">Inventory</a><a href="#the-core-engineering-flow">The core engineering flow</a><a href="#core-beliefs-principles">Core beliefs / principles</a><a href="#mechanics-worth-stealing">Mechanics worth stealing</a><a href="#weaknesses-where-it-breaks-down">Weaknesses / where it breaks down</a><a href="#fit-for-a-solo-senior-engineer-shipping-a-production-feature-in-a-day">Fit for a solo senior engineer shipping a production feature in a day</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

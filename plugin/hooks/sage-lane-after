@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# sage-lane-after — detect-and-revert fallback when Write path is only visible after the fact.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+. "$DIR/json-safe.sh"
+json_read
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+LANE="$ROOT/.sage/lane"
+LOG="$ROOT/.sage/lane-violations.jsonl"
+if [ ! -f "$LANE" ]; then
+  printf '%s\n' '{}'
+  exit 0
+fi
+PATH_VAL=$(json_get file_path)
+[ -n "$PATH_VAL" ] || { printf '%s\n' '{}'; exit 0; }
+python3 - "$LANE" "$PATH_VAL" "$ROOT" "$LOG" <<'PY'
+import json, os, sys, fnmatch, time
+lane_path, target, root, log = sys.argv[1:5]
+owns = []
+try:
+    owns = json.loads(open(lane_path).read()).get("owns") or []
+except Exception:
+    pass
+rel = os.path.relpath(os.path.realpath(target if os.path.isabs(target) else os.path.join(root, target)), root)
+ok = any(fnmatch.fnmatch(rel, g) or (g.endswith("/**") and rel.startswith(g[:-3])) for g in owns)
+if not ok:
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    with open(log, "a") as f:
+        f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "path": rel, "owns": owns})+"\n")
+print("{}")
+PY
+exit 0

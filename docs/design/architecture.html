@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sage-mode Architecture v0.1 · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html" class="on">Design</a><a href="../research/overview.html">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Design</div>
+    <h1>sage-mode Architecture v0.1</h1>
+    <div class="sub">Superseded by v2 — kept for the record</div>
+  </div>
+  <p><strong>Status:</strong> draft for review · <strong>Date:</strong> 2026-08-21 · <strong>Author:</strong> design session with Rohit</p>
+<blockquote>
+<p><strong>In plain terms:</strong> This is the blueprint for the repo. It proposes what sage-mode is, the ten things it always does, the twenty-five things it does only when asked, and the four hooks that stop the agent from lying to you. Read the exec summary at the top of each section; skip the technical block underneath unless you want to argue with it.</p>
+</blockquote>
+<hr />
+<h2 id="1-thesis">1. Thesis</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Everyone else built a <em>process</em>. We're building a <em>notebook that happens to execute</em>. Every project you touch grows a website in <code>docs/</code> — specs, plans, reviews, experiments, your preferences — and that same website is what the agents read before they do anything. The human-readable thing and the machine-readable thing are the same thing. Nobody has built this.</p>
+</blockquote>
+<p>The five reference repos (see <a href="../research/overview.html">Research</a>) converge on an identical spine and differ only in weight and enforcement. Their shared blind spot: <strong>the artifact trail is write-only</strong>. Compound Engineering writes learnings to a flat <code>docs/solutions/</code> directory with no index, needed a second skill to manage the rot, and accumulated 78 files. gstack ships a private knowledge-graph daemon. Superpowers and agent-skills write nothing between sessions at all.</p>
+<p>sage-mode's bet:</p>
+<ol>
+<li><strong>The project's <code>docs/</code> site is the unit of compounding.</strong> Every spec, plan, review, experiment, decision, and learning lands there as a rendered page and a source file, linked from <code>index.html</code>.</li>
+<li><strong>The same corpus is the agent's retrieval layer.</strong> A BM25/ripgrep index over <code>docs/</code> plus the skill catalog answers both "what did we decide about auth?" and "which skill handles a migration?" with one mechanism.</li>
+<li><strong>Ceremony is chosen by time budget, not task class.</strong> <code>--by 6h</code> produces a different pipeline than <code>--by 3d</code>. No other repo has a clock.</li>
+<li><strong>Discipline is written; enforcement is compiled.</strong> Rationalization tables (superpowers) state the rules; Cursor hooks (gstack) make the important ones unbreakable.</li>
+</ol>
+<p>Non-goals for v1: cross-harness portability (Cursor + Claude Code only), multi-user/team features, telemetry, marketplace distribution.</p>
+<hr />
+<h2 id="2-the-engineering-flow">2. The engineering flow</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Five phases with a hard stop at each one. You approve a spec, you approve a plan, agents build it in parallel in isolated copies of the repo, a different model tears the result apart, then it ships and writes down what it learned. The gates are where you spend your attention — everything between them runs without you.</p>
+</blockquote>
+<pre class="mermaid">flowchart TD
+    G["/sage 'goal' --by 6h"] --> SH["sage-shape<br/>technical PM interrogation"]
+    SH --> SP["docs/specs/[slug].html<br/>+ spec.md source"]
+    SP --> GATE1{{"GATE 1<br/>you approve the spec"}}
+    GATE1 --> PL["sage-plan<br/>staff-eng DAG decomposition"]
+    PL --> PJ["docs/plans/[slug].html<br/>+ plan.json (the DAG)"]
+    PJ --> GATE2{{"GATE 2<br/>you approve the plan + DAG"}}
+    GATE2 --> EX["sage-dag executor"]
+    EX --> W1["worktree A<br/>node 1,2"]
+    EX --> W2["worktree B<br/>node 3"]
+    EX --> W3["worktree C<br/>node 4"]
+    W1 --> J["join: merge + integration verify"]
+    W2 --> J
+    W3 --> J
+    J --> GATE3{{"GATE 3<br/>you approve the join"}}
+    GATE3 --> RV["sage-review<br/>fresh-context adversarial<br/>+ Codex cross-model if high risk"]
+    RV --> VF["sage-verify<br/>runtime evidence per profile"]
+    VF --> GATE4{{"GATE 4<br/>you approve the merge"}}
+    GATE4 --> SHIP["sage-ship<br/>changelog, PR, deploy"]
+    SHIP --> CP["sage-compound<br/>writes learning into the notebook"]
+    CP -.indexes.-> NB[("docs/ notebook<br/>+ search index")]
+    NB -.grounds.-> SH
+    NB -.grounds.-> PL
+    NB -.grounds.-> RV
+</pre>
+<p><strong>Artifact chain, by real path:</strong></p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Reads</th>
+<th>Writes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sage-shape</code></td>
+<td><code>docs/preferences/*</code>, <code>docs/learnings/*</code>, repo</td>
+<td><code>docs/specs/&lt;slug&gt;.{md,html}</code></td>
+</tr>
+<tr>
+<td><code>sage-plan</code></td>
+<td>the spec, <code>docs/learnings/*</code></td>
+<td><code>docs/plans/&lt;slug&gt;.{md,html}</code>, <code>docs/plans/&lt;slug&gt;.plan.json</code></td>
+</tr>
+<tr>
+<td><code>sage-dag</code></td>
+<td><code>plan.json</code></td>
+<td><code>.sage/runs/&lt;run-id&gt;/progress.md</code> (ledger), worktrees under <code>.worktrees/</code></td>
+</tr>
+<tr>
+<td><code>sage-build</code> (per node)</td>
+<td><code>.sage/runs/&lt;run-id&gt;/node-&lt;id&gt;-brief.md</code></td>
+<td>commits in its worktree, <code>node-&lt;id&gt;-report.md</code></td>
+</tr>
+<tr>
+<td><code>sage-review</code></td>
+<td>diff package file, node contracts</td>
+<td><code>docs/reviews/&lt;slug&gt;.{md,html}</code></td>
+</tr>
+<tr>
+<td><code>sage-verify</code></td>
+<td>profile config</td>
+<td><code>docs/reviews/&lt;slug&gt;-evidence/</code> (screenshots, logs, eval output)</td>
+</tr>
+<tr>
+<td><code>sage-compound</code></td>
+<td>the run</td>
+<td><code>docs/learnings/&lt;category&gt;/&lt;slug&gt;.md</code>, updates <code>docs/index.html</code></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="3-the-spine-ten-skills-always-available">3. The spine — ten skills, always available</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> These are the skills that fire on a normal day. Ten, not fifty. Everything else is in a searchable catalog and stays out of your context until something actually needs it.</p>
+</blockquote>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Skill</th>
+<th>Role</th>
+<th>Steals from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>sage-shape</code></td>
+<td>Technical-PM interrogation, one question at a time, to a written spec. Opens with three demand-reality questions (who breaks if this doesn't exist; what's the narrowest wedge; what does "working" look like on screen). Classifies into a <strong>time tier</strong>.</td>
+<td>gstack <code>office-hours</code>, CE <code>ce-brainstorm</code>, agent-skills <code>interview-me</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>sage-plan</code></td>
+<td>Decomposes an approved spec into a DAG. Each node declares: <code>id</code>, <code>title</code>, <code>depends_on[]</code>, <code>owns[]</code> (file globs), <code>acceptance[]</code>, <code>verify</code> (a command), <code>est_minutes</code>, <code>risk</code>. Refuses to emit a plan whose nodes have overlapping <code>owns</code> unless they're serialized.</td>
+<td>superpowers <code>writing-plans</code>, CE <code>ce-plan</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>sage-dag</code></td>
+<td>Executor. Topological sort, worktree per parallel branch, one implementer subagent per node with a <strong>file-based brief</strong>, ledger that survives compaction, join-point merges with integration verify.</td>
+<td>superpowers <code>subagent-driven-development</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>sage-build</code></td>
+<td>The per-node implementer contract: TDD red/green/refactor, commit per acceptance criterion, <code>NOTICED BUT NOT TOUCHING</code> scope valve, no claiming done without a fresh command run in the same message.</td>
+<td>superpowers TDD + <code>verification-before-completion</code>, agent-skills <code>incremental-implementation</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>sage-review</code></td>
+<td>Adversarial review. Fresh context, given <strong>ARTIFACT + CONTRACT, never the CLAIM</strong>. Scope-gated specialists selected by what the diff touches. Findings fingerprinted <code>path:line:category</code>, deduped, confidence-gated — a finding can't score ≥7 without quoting the motivating line. Escalates to Codex CLI cross-model when risk is high.</td>
+<td>agent-skills <code>doubt-driven-development</code>, gstack review army, CE persona roster</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>sage-verify</code></td>
+<td>Runtime evidence, pluggable by <strong>project profile</strong>: <code>web</code> (Playwright, 5 viewports, console errors), <code>api</code> (contract + migration safety), <code>cli</code> (golden files, TTHW timing), <code>ai-product</code> (eval suite + prompt regression). Nothing is "done" without evidence from this layer.</td>
+<td>gstack <code>/qa</code>, ui-ux <code>design-review</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>sage-ship</code></td>
+<td>Re-verify, changelog/version, PR with review output embedded, deploy hook.</td>
+<td>gstack <code>/ship</code>, CE <code>ce-commit-push-pr</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>sage-compound</code></td>
+<td>Writes exactly one learning per run into <code>docs/learnings/</code>, with frontmatter (<code>category</code>, <code>applies_when</code>, <code>tags</code>), and re-indexes. Refuses to write a duplicate — checks the index first.</td>
+<td>CE <code>ce-compound</code>, with the retrieval bug fixed</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>sage-notebook</code></td>
+<td>The renderer and librarian. Any source doc → styled HTML page; maintains <code>docs/index.html</code>, cross-links, and the search index. Every section renders exec-summary-then-technical.</td>
+<td>Nobody. This is ours.</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>sage-recall</code></td>
+<td>The search layer. One query interface over the notebook corpus <em>and</em> the skill catalog. Answers "what did we decide about X" and "which skill handles Y" with the same call.</td>
+<td>ui-ux <code>search.py</code> (BM25 subprocess), applied to a new domain</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="4-the-catalog-coverage-without-cost">4. The catalog — coverage without cost</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Everything gstack and agent-skills give you — security audits, migrations, observability, ADRs, accessibility — lives here. It doesn't load, doesn't fire, and doesn't cost you a token until <code>sage-recall</code> pulls it in because the task actually needs it.</p>
+</blockquote>
+<p>Roughly 25 skills, each a <code>SKILL.md</code> with structured frontmatter (<code>name</code>, <code>description</code>, <code>applies_when</code>, <code>phase</code>, <code>profile</code>, <code>cost_tier</code>). They are <strong>never</strong> auto-loaded. <code>sage-recall</code> indexes their frontmatter alongside the notebook corpus.</p>
+<p>Initial catalog, grouped: <em>design</em> (design-review, a11y-audit, design-system, ui-styling) · <em>safety</em> (security-audit, threat-model, dependency-audit, secrets-scan) · <em>data</em> (migration-safety, data-backfill, schema-review) · <em>ops</em> (observability, ci-cd, deploy-setup, canary, incident-triage) · <em>quality</em> (perf-profile, load-test, code-simplify, dead-code) · <em>interface</em> (api-contract, cli-ux, error-taxonomy) · <em>knowledge</em> (adr, doc-release, deprecation) · <em>ai-product</em> (eval-harness, prompt-regression, skill-authoring).</p>
+<p><strong>Why this works and loading-everything doesn't:</strong> ui-ux-pro-max serves 88 styles, 192 palettes, 1,935 fonts and 119 guidelines from 22 CSVs through a BM25 subprocess, returning 3–10 rows per query. Nothing enters context until it's asked for. gstack, loading everything, has a single skill file at ~1,740 lines and a tool that exists only to audit the resulting bill.</p>
+<hr />
+<h2 id="5-enforcement-four-hooks-that-actually-block">5. Enforcement — four hooks that actually block</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Four scripts that can veto the agent. They stop it deleting things, editing files outside its lane, spawning runaway subagents, and claiming success without running the tests. They don't touch your terminal — only the agent's tool calls.</p>
+</blockquote>
+<p><a href="https://cursor.com/docs/hooks">Cursor exposes 23 hook events</a>; six can return <code>{"permission": "deny"}</code>.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Event</th>
+<th>Enforces</th>
+<th>Escape hatch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sage-careful</code></td>
+<td><code>beforeShellExecution</code></td>
+<td>Denies destructive shell (<code>rm -rf</code> outside worktree, force-push to default branch, <code>DROP TABLE</code> against prod DSNs). Warns on medium-risk.</td>
+<td><code>/sage-unsafe &lt;reason&gt;</code> for one turn</td>
+</tr>
+<tr>
+<td><code>sage-lane</code></td>
+<td><code>preToolUse</code> (Edit/Write)</td>
+<td>During a DAG run, each node's agent may only write inside its declared <code>owns[]</code> globs. Fail-closed: unparseable path is denied. This is what makes parallel worktrees safe.</td>
+<td>Node declares an <code>owns</code> amendment, which re-gates</td>
+</tr>
+<tr>
+<td><code>sage-solo</code></td>
+<td><code>subagentStart</code></td>
+<td>Implementer and reviewer subagents may not spawn their own subagents. Superpowers documented the failure: <em>"every reviewer a worker spawned duplicated the task review the controller dispatched anyway."</em></td>
+<td>None; this is absolute</td>
+</tr>
+<tr>
+<td><code>sage-proof</code></td>
+<td><code>stop</code></td>
+<td>If the turn claims completion and the node's declared <code>verify</code> command has not passed since the last edit, inject a <code>followup_message</code> forcing the fix. Cursor's <code>stop</code> can auto-continue up to 5 times.</td>
+<td>Verify command declared <code>none</code> in the plan (visible in the gate)</td>
+</tr>
+</tbody>
+</table></div>
+<p>Plus <code>sessionStart</code>, which is not an enforcement hook but the bootstrap: injects the spine index, the project's <code>docs/preferences/</code> summary, and any in-flight run's ledger state.</p>
+<hr />
+<h2 id="6-the-time-budget-the-thing-nobody-has">6. The time budget — the thing nobody has</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> You tell it how long you've got. That single number picks how much process runs. Six hours doesn't get a four-persona plan review; three days might.</p>
+</blockquote>
+<p><code>/sage "&lt;goal&gt;" --by &lt;duration&gt;</code> sets a tier. The tier is declared in the spec and visible at Gate 1.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Trigger</th>
+<th>Pipeline</th>
+<th>Gates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>spike</strong></td>
+<td><code>--by 1h</code>, or shape classifies as a probe</td>
+<td>No spec file. Throwaway branch, timeboxed investigation, written finding only.</td>
+<td>1 (report)</td>
+</tr>
+<tr>
+<td><strong>day</strong></td>
+<td><code>--by 4h</code>–<code>--by 12h</code> (default)</td>
+<td>Spec (short form) → DAG → parallel build → single review pass, cross-model only if risk is high → verify → ship.</td>
+<td>4</td>
+</tr>
+<tr>
+<td><strong>project</strong></td>
+<td><code>--by 2d</code>+</td>
+<td>Full form: spec with alternatives considered, plan review pass before Gate 2, per-node review + whole-branch review, full catalog consultation.</td>
+<td>6+</td>
+</tr>
+</tbody>
+</table></div>
+<p>Every skill reads the tier and adapts its own ceremony. A skill that can't do useful work in the tier says so at the gate rather than silently doing a worse job.</p>
+<hr />
+<h2 id="7-the-notebook-docs-as-the-product">7. The notebook — <code>docs/</code> as the product</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Every project gets a <code>docs/index.html</code> that is a real little website: specs, plans, reviews, experiments, learnings, and your standing preferences. You browse it. The agents search it. It's the memory.</p>
+</blockquote>
+<pre><code>docs/
+├── index.html              # home: what this project is, current state, recent activity
+├── assets/                 # notebook.css, mermaid.min.js — vendored, offline-capable
+├── specs/                  # &lt;slug&gt;.md (source) + &lt;slug&gt;.html (rendered)
+├── plans/                  # &lt;slug&gt;.md, &lt;slug&gt;.html, &lt;slug&gt;.plan.json (the DAG)
+├── reviews/                # findings + evidence/ (screenshots, logs, eval output)
+├── experiments/            # things tried, results, and whether we kept them
+├── learnings/              # sage-compound output, categorized, indexed, deduped
+├── research/               # external teardowns and reference material
+└── preferences/            # YOUR standing decisions — stack, style, defaults, vetoes
+</code></pre>
+<p>Design rules for every rendered page:</p>
+<ol>
+<li><strong>Exec summary first, always.</strong> Each <code>##</code> section opens with a plain-language block, then the technical detail. This is a house rule enforced by <code>sage-notebook</code>, not a suggestion.</li>
+<li><strong>Self-contained HTML.</strong> Inline CSS, vendored JS, no CDN. Works offline, works from <code>file://</code>, survives being zipped and mailed.</li>
+<li><strong>Markdown is the source, HTML is the artifact.</strong> Agents edit <code>.md</code>; <code>sage-notebook</code> renders. Git diffs stay readable.</li>
+<li><strong>Diagrams, not nested lists.</strong> Any DAG, state machine, or flow renders as Mermaid.</li>
+<li><strong>Every page is linked from the index</strong> and carries frontmatter that the search index consumes.</li>
+</ol>
+<p><code>docs/preferences/</code> is the highest-leverage directory: it holds the standing decisions you'd otherwise repeat every session (stack, testing style, what you always want, what you never want). <code>sage-shape</code> and <code>sage-plan</code> are required to read it. It's Compound Engineering's <code>CONCEPTS.md</code>, but browsable and yours.</p>
+<hr />
+<h2 id="8-repo-layout">8. Repo layout</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> What actually lives in the sage-mode repo, as opposed to what it generates in your projects.</p>
+</blockquote>
+<pre><code>sage-mode/
+├── plugin.json                 # Cursor Agent Plugin manifest (also works as a Claude Code plugin)
+├── skills/
+│   ├── spine/                  # 10 skills, each SKILL.md + references/
+│   └── catalog/                # ~25 skills, indexed, never auto-loaded
+├── hooks/
+│   ├── hooks.json              # Cursor hook registrations
+│   ├── sage-careful            # beforeShellExecution
+│   ├── sage-lane               # preToolUse Edit/Write
+│   ├── sage-solo               # subagentStart
+│   ├── sage-proof              # stop
+│   └── sage-bootstrap          # sessionStart
+├── lib/
+│   ├── dag.ts                  # plan.json schema, topo sort, worktree allocation
+│   ├── recall/                 # BM25 index + query CLI (the ui-ux pattern)
+│   ├── notebook/               # md → html renderer, index maintenance
+│   └── review/                 # finding schema, fingerprint, dedup, confidence gate
+├── profiles/                   # web | api | cli | ai-product verification profiles
+├── templates/                  # spec, plan, review, learning, notebook page
+├── docs/                       # sage-mode's own notebook (dogfood)
+└── evals/                      # does the routing work? does the pipeline hold?
+</code></pre>
+<hr />
+<h2 id="9-build-order">9. Build order</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> What to build first so it's useful before it's finished. Each phase is independently valuable — you could stop after phase 2 and still have something you'd use.</p>
+</blockquote>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Ships</th>
+<th>Why first</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>0 — Notebook</strong></td>
+<td><code>sage-notebook</code>, <code>docs/</code> structure, renderer, index, templates</td>
+<td>Every later phase writes into it. Also immediately useful with zero agents.</td>
+</tr>
+<tr>
+<td><strong>1 — Spine, serial</strong></td>
+<td><code>sage-shape</code>, <code>sage-plan</code>, <code>sage-build</code>, <code>sage-review</code>, <code>sage-ship</code>; gates 1/2/4; no DAG, no parallelism</td>
+<td>This is the whole value of four of the five reference repos. Serial execution proves the artifact chain before parallelism complicates it.</td>
+</tr>
+<tr>
+<td><strong>2 — Enforcement</strong></td>
+<td><code>sage-careful</code>, <code>sage-proof</code>, <code>sage-bootstrap</code></td>
+<td>Cheap, high-value, and <code>sage-proof</code> alone kills the most common agent lie.</td>
+</tr>
+<tr>
+<td><strong>3 — Recall</strong></td>
+<td>BM25 index, <code>sage-recall</code>, catalog skills authored</td>
+<td>Unlocks the "full lifecycle without full cost" claim.</td>
+</tr>
+<tr>
+<td><strong>4 — DAG</strong></td>
+<td><code>sage-dag</code>, <code>sage-lane</code>, <code>sage-solo</code>, worktree orchestration, join gates</td>
+<td>The riskiest piece; build it once the serial path is trustworthy.</td>
+</tr>
+<tr>
+<td><strong>5 — Verify profiles</strong></td>
+<td><code>web</code>, then <code>ai-product</code>, then <code>api</code>, then <code>cli</code></td>
+<td>Order by what you ship most. <code>ai-product</code> matters because sage-mode is one.</td>
+</tr>
+<tr>
+<td><strong>6 — Compound</strong></td>
+<td><code>sage-compound</code> + dedup against the index</td>
+<td>Only meaningful once there's a corpus and a search layer to dedupe against.</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="10-open-questions">10. Open questions</h2>
+<blockquote>
+<p><strong>In plain terms:</strong> Things I'd want you to decide before I write code. None of them block phase 0.</p>
+</blockquote>
+<ol>
+<li><strong>Does the plan DAG need a UI?</strong> A rendered DAG in the plan page is read-only. Editing a node's ownership or dependencies means editing JSON or asking the agent. Gate-2 ergonomics may demand more than that.</li>
+<li><strong>Where does <code>docs/</code> live for a project you don't own?</strong> Committing agent notes into a work repo may be unwelcome. Options: in-repo (best for compounding), a sibling <code>../&lt;project&gt;-notebook/</code>, or <code>~/.sage/projects/&lt;slug&gt;/</code> (gstack's choice).</li>
+<li><strong>How is a run resumed after a crash?</strong> The ledger design (superpowers') survives compaction. Crash recovery across worktrees with partial merges is harder and needs a explicit story.</li>
+<li><strong>Cost ceiling per run?</strong> Nobody in the reference set tracks tokens. A <code>--budget</code> alongside <code>--by</code> would be genuinely novel, but needs a cost signal the harness may not expose.</li>
+<li><strong>How do learnings get pruned?</strong> CE needed a second skill for this. Better answer: <code>sage-compound</code> refuses near-duplicates at write time using the index — but "near" needs a threshold, and a wrong one silently loses knowledge.</li>
+</ol>
+  <div class="foot">sage-mode notebook · rendered 2026-08-21</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#1-thesis">1. Thesis</a><a href="#2-the-engineering-flow">2. The engineering flow</a><a href="#3-the-spine-ten-skills-always-available">3. The spine — ten skills, always available</a><a href="#4-the-catalog-coverage-without-cost">4. The catalog — coverage without cost</a><a href="#5-enforcement-four-hooks-that-actually-block">5. Enforcement — four hooks that actually block</a><a href="#6-the-time-budget-the-thing-nobody-has">6. The time budget — the thing nobody has</a><a href="#7-the-notebook-docs-as-the-product">7. The notebook — docs/ as the product</a><a href="#8-repo-layout">8. Repo layout</a><a href="#9-build-order">9. Build order</a><a href="#10-open-questions">10. Open questions</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+#!/usr/bin/env sh
+# sage-careful — beforeShellExecution. Ask-tier; never failClosed.
+# HIGH deny only for simple (non-compound) recursive delete of / ~ $HOME /* and force-push to default branch.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+. "$DIR/json-safe.sh"
+json_read
+if [ -z "${JSON_IN:-}" ]; then
+  printf '%s\n' '{}'
+  exit 0
+fi
+if ! json_valid; then
+  # fail open to ask
+  python3 -c 'import json; print(json.dumps({"permission":"ask","agent_message":"[careful] Could not parse payload. Asking (fail open)."}))' 2>/dev/null || printf '%s\n' '{"permission":"ask"}'
+  exit 0
+fi
+
+CMD=$(json_get command)
+[ -n "$CMD" ] || CMD=$(json_get tool_input.command)
+
+# one-turn escape hatch
+UNSAFE=""
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+if [ -f "$ROOT/.sage/unsafe" ]; then
+  UNSAFE=1
+  rm -f "$ROOT/.sage/unsafe"
+fi
+if [ -n "$UNSAFE" ]; then
+  printf '%s\n' '{}'
+  exit 0
+fi
+
+# obfuscation tripwire — ASK first
+case "$CMD" in
+  *'${IFS}'*|*'${ifs}'*|*base64*\|*sh*|*base64*\|*bash*)
+    python3 -c 'import json; print(json.dumps({"permission":"ask","agent_message":"[careful] Obfuscated command. Confirm before running."}))' 2>/dev/null || printf '%s\n' '{"permission":"ask"}'
+    exit 0
+    ;;
+esac
+
+IS_SIMPLE=1
+case "$CMD" in
+  *';'*|*'&&'*|*'||'*|*'|'*|*$'\n'*) IS_SIMPLE=0 ;;
+esac
+
+# safe exceptions — anchored whole-command, single-line only
+case "$CMD" in
+  *$'\n'*) ;;
+  'rm -rf node_modules'|'rm -rf .next'|'rm -rf dist'|'rm -rf __pycache__'|'rm -rf .cache'|'rm -rf build'|'rm -rf .turbo'|'rm -rf coverage'|\
+  'rm -rf ./node_modules'|'rm -rf ./dist')
+    printf '%s\n' '{}'
+    exit 0
+    ;;
+esac
+
+deny() {
+  msg=$1
+  python3 -c 'import json,sys; print(json.dumps({"permission":"deny","agent_message":sys.argv[1],"user_message":sys.argv[1]}))' "$msg" 2>/dev/null || printf '%s\n' '{"permission":"deny"}'
+  exit 0
+}
+ask() {
+  msg=$1
+  python3 -c 'import json,sys; print(json.dumps({"permission":"ask","agent_message":sys.argv[1],"user_message":sys.argv[1]}))' "$msg" 2>/dev/null || printf '%s\n' '{"permission":"ask"}'
+  exit 0
+}
+
+if [ "$IS_SIMPLE" = 1 ]; then
+  # token-by-token recursive delete of exactly / ~ $HOME /*
+  case "$CMD" in
+    'rm -rf /'|'rm -rf /'|'rm -r /'|'rm -fr /') deny "[careful] Refusing recursive delete of /." ;;
+    'rm -rf ~'|'rm -rf ~/'|'rm -rf $HOME'|'rm -rf "$HOME"'|'rm -rf ~/*') deny "[careful] Refusing recursive delete of home." ;;
+    'rm -rf /*') deny "[careful] Refusing recursive delete of /*." ;;
+  esac
+  # force-push to default branch
+  case "$CMD" in
+    *'git push --force'*|*'git push -f '*)
+      DEF=$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@origin/@@')
+      [ -n "$DEF" ] || DEF=main
+      case "$CMD" in
+        *" $DEF"*|*origin/$DEF*|*"HEAD:$DEF"*) deny "[careful] Force-push to default branch ($DEF) denied." ;;
+      esac
+      ;;
+  esac
+fi
+
+# MEDIUM — always ask
+case "$CMD" in
+  *'rm -r'*|*'DROP TABLE'*|*'DROP DATABASE'*|*'TRUNCATE'*|*'git push --force'*|*'git push -f '*|*'git reset --hard'*|*'git checkout .'*|*'git restore .'*|*'kubectl delete'*|*'docker rm -f'*|*'docker system prune'*)
+    ask "[careful] Destructive command. Confirm to proceed."
+    ;;
+esac
+
+printf '%s\n' '{}'
+exit 0
