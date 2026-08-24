@@ -9,7 +9,7 @@
 <body>
 <div class="bar"><div class="bar-in">
   <a class="brand" href="index.html">sage<span>·</span>mode</a>
-  <nav><a href="index.html" class="on">Home</a><a href="design/architecture.html">Design</a><a href="research/overview.html">Research</a></nav>
+  <nav><a href="index.html" class="on">Home</a><a href="design/tech-spec.html">Design</a><a href="research/overview.html">Research</a></nav>
 </div></div>
 <div class="wrap">
 <main>
@@ -24,20 +24,60 @@
 
 <div class="sec-h">Design</div>
 <div class="cards">
+  <a class="card" href="design/adversarial-review.html">
+    <div class="k">review · v1, re-reviewed</div>
+    <div class="t">Adversarial Re-Review</div>
+    <div class="d">Ready with caveats. Independently re-verified the fix pass, found a new false negative in the same safety mechanism using glob shapes nobody had tried, and a CI gap — both closed same day — plus an honest five-repo comparison of the built system, not just the design.</div>
+  </a>
+  <a class="card" href="design/build-review.html">
+    <div class="k">review · v1</div>
+    <div class="t">Implementation Review</div>
+    <div class="d">The team's build against the spec: three blockers (hooks dead on Linux, unsafe lane check, empty skill bodies), eight major issues, and the parts that came out better than specified.</div>
+  </a>
+  <a class="card" href="design/tech-spec.html">
+    <div class="k">spec · build-ready</div>
+    <div class="t">Technical Specification v1.0</div>
+    <div class="d">Standalone. Everything a team needs to build sage-mode from an empty directory: data contracts, library APIs, hook logic, skill procedures, and 24 dependency-ordered work packages with acceptance criteria.</div>
+  </a>
+  <a class="card" href="design/architecture-v3.html">
+    <div class="k">v3 · rationale</div>
+    <div class="t">Architecture v3</div>
+    <div class="d">Eight commands you drive, an org of specialists underneath, three cost lanes that keep it runnable daily, and gstack's implementation machinery ported in.</div>
+  </a>
+  <a class="card" href="design/design-org.html">
+    <div class="k">design org</div>
+    <div class="t">The Design Org</div>
+    <div class="d">Six design commands, an agency of roles, and a twenty-item rubric for detecting the tells that make a page look AI-generated.</div>
+  </a>
+  <a class="card" href="research/scorecard.html">
+    <div class="k">scorecard</div>
+    <div class="t">sage-mode vs. the Five</div>
+    <div class="d">Twelve dimensions, six systems, scored — with maturity kept out of the total, because five of them exist and one is a document.</div>
+  </a>
+  <a class="card" href="research/cursor-capabilities.html">
+    <div class="k">research</div>
+    <div class="t">What Cursor Can Actually Do</div>
+    <div class="d">Plugins, skills, subagents with per-agent model selection, all 20 hook events, worktrees and parallelism — and the three limits that killed v1 ideas.</div>
+  </a>
+  <a class="card" href="research/gstack-coding-mechanics.html">
+    <div class="k">research</div>
+    <div class="t">gstack's Implementation Machinery</div>
+    <div class="d">Line-by-line: subagent dispatch, the finding schema, the verification gate, content-addressed test freshness, hook polarity, the QA circuit breaker.</div>
+  </a>
+  <a class="card" href="design/architecture-v2.html">
+    <div class="k">v2 · superseded</div>
+    <div class="t">Architecture v2</div>
+    <div class="d">Introduced the org chart and the sprint model. Replaced by v3, which drops the router and adds the cost architecture.</div>
+  </a>
   <a class="card" href="design/architecture.html">
-    <div class="k">v0.1 · draft</div>
-    <div class="t">Architecture Proposal</div>
-    <div class="d">The thesis, the five-phase flow, ten spine skills, the catalog, four blocking hooks, the time budget, and the build order.</div>
+    <div class="k">v0.1 · superseded</div>
+    <div class="t">Architecture v0.1</div>
+    <div class="d">The first pass: spine plus catalog, four blocking hooks, a time budget. Kept for the record.</div>
   </a>
   <div class="card ghost">
     <div class="k">next</div>
-    <div class="t">Skill Specifications</div>
-    <div class="d">One spec per spine skill: contract, inputs, outputs, gate behavior, rationalization table.</div>
-  </div>
-  <div class="card ghost">
-    <div class="k">next</div>
     <div class="t">DAG Schema</div>
-    <div class="d"><code>plan.json</code> — node ownership, dependencies, verify commands, worktree allocation.</div>
+    <div class="d"><code>dag.json</code> — node ownership lanes, dependencies, verify commands, worktree allocation.</div>
   </div>
 </div>
 

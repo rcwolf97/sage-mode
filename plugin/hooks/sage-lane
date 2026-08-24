@@ -1,0 +1,247 @@
+#!/usr/bin/env sh
+# sage-lane — preToolUse Write|Delete. Deny-tier, failClosed.
+# Real logic (glob matching, symlink-safe path resolution) needs a real
+# language, not shell. Per tech-spec §4.1, jq/python3/node are the declared
+# JSON-parsing prerequisites; jq can't do realpath/glob resolution, so the
+# order here is python3, then node (a hard prerequisite for the rest of the
+# system anyway), then — if neither exists — deny per this hook's own
+# declared polarity (failClosed) with a message naming what's missing.
+set -eu
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+LANE="$ROOT/.sage/lane"
+PAY=$(mktemp "${TMPDIR:-/tmp}/sage-lane.XXXXXX")
+trap 'rm -f "$PAY"' EXIT
+cat > "$PAY"
+
+if command -v python3 >/dev/null 2>&1; then
+python3 - "$ROOT" "$LANE" "$PAY" <<'PY'
+import json, os, sys, fnmatch
+
+root, lane_path, pay = sys.argv[1], sys.argv[2], sys.argv[3]
+raw = open(pay, "rb").read()
+if raw.startswith(b"\xef\xbb\xbf"):
+    raw = raw[3:]
+
+def deny(msg: str) -> None:
+    print(json.dumps({"permission": "deny", "agent_message": msg}))
+    sys.exit(0)
+
+if not os.path.isfile(lane_path):
+    print("{}")
+    sys.exit(0)
+
+if not raw.strip():
+    deny("[lane] Could not parse the tool payload. Blocked (fail closed).")
+
+try:
+    payload = json.loads(raw.decode("utf-8"))
+except Exception:
+    deny("[lane] Could not parse the tool payload. Blocked (fail closed).")
+
+ti = payload.get("tool_input") or {}
+path = None
+if isinstance(ti, dict):
+    for k in ("path", "file_path", "filePath", "target_file", "file"):
+        if ti.get(k):
+            path = ti[k]
+            break
+if not path:
+    path = payload.get("file_path")
+if not path:
+    deny("[lane] Write payload has no file path. Blocked (fail closed). Request a lane amendment rather than retry.")
+
+abs_path = path if os.path.isabs(path) else os.path.join(root, path)
+target = os.path.realpath(abs_path)
+try:
+    data = json.loads(open(lane_path).read())
+    owns = data.get("owns") or []
+except Exception:
+    owns = []
+
+rel = os.path.relpath(target, os.path.realpath(root))
+if rel.startswith(".."):
+    deny(f"[lane] {rel} is outside owns {owns}. Request a lane amendment rather than retry.")
+
+def matches(rel: str, g: str) -> bool:
+    if g.startswith("./"):
+        g = g[2:]
+    g = g.replace("\\", "/")
+    rel = rel.replace("\\", "/")
+    if g.endswith("/**"):
+        prefix = g[:-3].rstrip("/")
+        return rel == prefix or rel.startswith(prefix + "/")
+    if g.endswith("/*"):
+        prefix = g[:-2].rstrip("/")
+        rest = rel[len(prefix)+1:] if rel.startswith(prefix + "/") else None
+        return rest is not None and "/" not in rest
+    return fnmatch.fnmatch(rel, g) or rel == g
+
+if any(matches(rel, g) for g in owns):
+    print("{}")
+else:
+    deny(f"[lane] {rel} is outside owns {owns}. Request a lane amendment rather than retry.")
+PY
+elif command -v node >/dev/null 2>&1; then
+node - "$ROOT" "$LANE" "$PAY" <<'JS'
+const fs = require("fs");
+const path = require("path");
+
+const [root, lanePath, pay] = process.argv.slice(2);
+
+function deny(msg) {
+  process.stdout.write(JSON.stringify({ permission: "deny", agent_message: msg }) + "\n");
+  process.exit(0);
+}
+
+// Match Python's list repr (single-quoted) so agent_message text is
+// byte-identical regardless of which interpreter served the request.
+function pyRepr(arr) {
+  return "[" + arr.map((s) => "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'").join(", ") + "]";
+}
+
+let raw = fs.readFileSync(pay);
+if (raw.length >= 3 && raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) {
+  raw = raw.slice(3);
+}
+
+if (!fs.existsSync(lanePath) || !fs.statSync(lanePath).isFile()) {
+  process.stdout.write("{}\n");
+  process.exit(0);
+}
+
+const text = raw.toString("utf8");
+if (!text.trim()) {
+  deny("[lane] Could not parse the tool payload. Blocked (fail closed).");
+}
+
+let payload;
+try {
+  payload = JSON.parse(text);
+} catch (e) {
+  deny("[lane] Could not parse the tool payload. Blocked (fail closed).");
+}
+
+const ti = (payload && typeof payload.tool_input === "object" && payload.tool_input) || {};
+let target = null;
+for (const k of ["path", "file_path", "filePath", "target_file", "file"]) {
+  if (ti && ti[k]) {
+    target = ti[k];
+    break;
+  }
+}
+if (!target && payload && payload.file_path) {
+  target = payload.file_path;
+}
+if (!target) {
+  deny("[lane] Write payload has no file path. Blocked (fail closed). Request a lane amendment rather than retry.");
+}
+
+const absPath = path.isAbsolute(target) ? target : path.join(root, target);
+let resolvedTarget;
+try {
+  resolvedTarget = fs.realpathSync(absPath);
+} catch (e) {
+  // path may not exist yet (a new file being created) — resolve as far as
+  // possible, then join the remaining unresolved tail, mirroring Python's
+  // os.path.realpath (which never throws on a missing final component).
+  resolvedTarget = realpathMissingOk(absPath);
+}
+
+function realpathMissingOk(p) {
+  const parts = [];
+  let cur = p;
+  while (true) {
+    try {
+      return path.join(fs.realpathSync(cur), ...parts.reverse());
+    } catch (e) {
+      const parent = path.dirname(cur);
+      if (parent === cur) {
+        return path.join(cur, ...parts.reverse());
+      }
+      parts.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+let resolvedRoot;
+try {
+  resolvedRoot = fs.realpathSync(root);
+} catch (e) {
+  resolvedRoot = path.resolve(root);
+}
+
+let owns = [];
+try {
+  const data = JSON.parse(fs.readFileSync(lanePath, "utf8"));
+  owns = data.owns || [];
+} catch (e) {
+  owns = [];
+}
+
+let rel = path.relative(resolvedRoot, resolvedTarget);
+if (rel === ".." || rel.startsWith(".." + path.sep)) {
+  deny(`[lane] ${rel} is outside owns ${pyRepr(owns)}. Request a lane amendment rather than retry.`);
+}
+rel = rel.split(path.sep).join("/");
+
+function globToRegExp(g) {
+  // fnmatch-equivalent: * matches within a segment or across, ? single char,
+  // [...] character class — same semantics used by the python fnmatch branch.
+  let re = "";
+  for (let i = 0; i < g.length; i++) {
+    const c = g[i];
+    if (c === "*") {
+      re += ".*";
+    } else if (c === "?") {
+      re += ".";
+    } else if (c === "[") {
+      let j = i + 1;
+      let cls = "[";
+      if (g[j] === "!") {
+        cls += "^";
+        j++;
+      }
+      while (j < g.length && g[j] !== "]") {
+        cls += g[j];
+        j++;
+      }
+      cls += "]";
+      re += cls;
+      i = j;
+    } else {
+      re += c.replace(/[.+^${}()|\\]/g, "\\$&");
+    }
+  }
+  return new RegExp("^" + re + "$");
+}
+
+function matches(rel, g) {
+  if (g.startsWith("./")) {
+    g = g.slice(2);
+  }
+  g = g.split("\\").join("/");
+  if (g.endsWith("/**")) {
+    const prefix = g.slice(0, -3).replace(/\/+$/, "");
+    return rel === prefix || rel.startsWith(prefix + "/");
+  }
+  if (g.endsWith("/*")) {
+    const prefix = g.slice(0, -2).replace(/\/+$/, "");
+    if (rel.startsWith(prefix + "/")) {
+      const rest = rel.slice(prefix.length + 1);
+      return !rest.includes("/");
+    }
+    return false;
+  }
+  return globToRegExp(g).test(rel) || rel === g;
+}
+
+if (owns.some((g) => matches(rel, g))) {
+  process.stdout.write("{}\n");
+} else {
+  deny(`[lane] ${rel} is outside owns ${pyRepr(owns)}. Request a lane amendment rather than retry.`);
+}
+JS
+else
+  printf '%s\n' '{"permission":"deny","agent_message":"[lane] Neither python3 nor node is available to parse and enforce the lane. Blocked (fail closed)."}'
+fi

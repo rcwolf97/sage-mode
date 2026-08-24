@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sage-mode project config",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": true,
+  "properties": {
+    "version": { "const": 1 },
+    "profile": { "enum": ["web", "api", "cli", "ai-product"] },
+    "verify": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "lanes": { "type": "object", "additionalProperties": { "type": "string" } },
+    "notebook": {
+      "type": "object",
+      "properties": {
+        "root": { "type": "string" },
+        "publish": { "type": "boolean" }
+      }
+    },
+    "lane_enforcement": { "enum": ["hook", "detect-revert", "both"] },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "warn_metered_tokens": { "type": "number" }
+      }
+    }
+  }
+}

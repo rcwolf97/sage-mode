@@ -1,0 +1,9 @@
+{
+  "name": "cli",
+  "checks": [
+    { "id": "suite", "command": "${verify.tests}", "required": true },
+    { "id": "golden", "kind": "golden-file", "required": true },
+    { "id": "sandbox", "kind": "clean-sandbox-invocation", "required": true },
+    { "id": "ttfs", "kind": "time-to-first-success", "required": true }
+  ]
+}

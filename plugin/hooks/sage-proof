@@ -1,0 +1,66 @@
+#!/usr/bin/env sh
+# sage-proof — stop hook. Cannot block; followup_message with loop_limit 3.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+. "$DIR/json-safe.sh"
+json_read
+ROOT="${CURSOR_PROJECT_DIR:-.}"
+LEDGER=""
+if [ -d "$ROOT/.sage/sprints" ]; then
+  LEDGER=$(find "$ROOT/.sage/sprints" -name ledger.md 2>/dev/null | sort | tail -n 1)
+fi
+if [ -z "$LEDGER" ]; then
+  printf '%s\n' '{}'
+  exit 0
+fi
+LOOP=$(json_get loop_count)
+[ -n "$LOOP" ] || LOOP=0
+SAGE_BIN="${SAGE_HOME:-}/lib/cli.js"
+if [ ! -f "$SAGE_BIN" ]; then
+  SAGE_BIN="$HOME/.sage/bin/sage"
+fi
+python3 - "$LEDGER" "$LOOP" "$SAGE_BIN" "$ROOT" <<'PY'
+import json, os, subprocess, sys
+ledger, loop, sage, root = sys.argv[1], int(float(sys.argv[2] or 0)), sys.argv[3], sys.argv[4]
+text = open(ledger).read()
+active = None
+verify = None
+for line in text.splitlines():
+    if not line.startswith("| n"):
+        continue
+    cols = [c.strip() for c in line.split("|")]
+    if len(cols) < 7:
+        continue
+    st = cols[2]
+    if st in ("done", "abandoned", "pending"):
+        continue
+    active, verify = cols[1], cols[6]
+    break
+if not active or not verify or verify in ("—", "none", "-"):
+    print("{}")
+    sys.exit(0)
+cmd = ["node", sage, "evidence", "check", "--label", active, "--expect-cmd", verify, "--json"] if sage.endswith(".js") else [sage, "evidence", "check", "--label", active, "--expect-cmd", verify, "--json"]
+try:
+    r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=8)
+    out = r.stdout or ""
+    grade, reason = "STALE", "check failed"
+    try:
+        j = json.loads(out)
+        grade, reason = j.get("grade", "STALE"), j.get("reason", "")
+    except Exception:
+        if "FRESH" in out:
+            grade = "FRESH"
+    if grade == "FRESH":
+        print("{}")
+        sys.exit(0)
+    if loop < 3:
+        print(json.dumps({"followup_message": f"Verification for {active} is not fresh: {reason}. Run `{verify}` and fix what fails before reporting done."}))
+        sys.exit(0)
+    warn = "WARNING — allowing after 3 blocked re-entries but the declared check is still FAILING. Verification is RED; do not treat this turn as verified."
+    with open(ledger, "a") as f:
+        f.write("\n" + warn + "\n")
+    print("{}")
+except Exception:
+    print("{}")
+PY
+exit 0
