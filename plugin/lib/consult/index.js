@@ -2,6 +2,48 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { gitRoot, homeDir, projectSageDir, readSageHome, sageUserDir } from "../util.js";
+// architecture-v3.md §5 promised this and the code never delivered it:
+// "`--output-format json` returns `total_cost_usd` and a per-model
+// breakdown, so the ledger can record what every consult cost." The old
+// code parsed total_cost_usd and threw the per-model breakdown away.
+//
+// This is deliberately scoped to what Lane B can actually prove. Lane A/C's
+// Cursor-native `model:` frontmatter dispatch (grok/gemini for the
+// implementer/reviewer/red-team roster) has no equivalent — no documented
+// Cursor hook payload reports back which model executed a subagent, so no
+// code in this repo can verify it; that stays an honestly-labeled host
+// assumption (see docs/research/scorecard.md §6), not something this
+// function pretends to close. What Lane B's `claude -p --output-format
+// json` call CAN prove, because the CLI is the thing sage-mode itself
+// invokes and its own response envelope is available: whether the call
+// actually returned a per-model usage breakdown, and if so, which model(s)
+// it names — the same evidence compound-engineering-plugin's own
+// `extract_model_receipt()` reads from `.modelUsage` on the terminal
+// `type=result` event (its script targets `stream-json`; sage-mode's Lane B
+// uses plain `--output-format json`, whose single JSON object carries the
+// same top-level shape as that terminal event, `modelUsage` included).
+//
+// Absence is not evidence of failure and must never be upgraded to
+// "verified": an older `claude` CLI, a schema change, or a route that
+// doesn't populate the field all look identical to "everything's fine" from
+// the outside. Silently treating "we didn't get a receipt" as "it must be
+// fine" is exactly the gap this function exists to close, so an absent or
+// malformed field always returns verified: false, never a guess.
+export function extractModelReceipt(rawOutput) {
+    try {
+        const json = JSON.parse(rawOutput);
+        const usage = json.modelUsage;
+        if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+            const models = Object.keys(usage);
+            if (models.length > 0)
+                return { verified: true, models };
+        }
+    }
+    catch {
+        /* not JSON, or no modelUsage — fall through to unverified */
+    }
+    return { verified: false, models: [] };
+}
 function trustedRoots() {
     const cfg = join(sageUserDir(), "config.json");
     if (!existsSync(cfg))
@@ -112,6 +154,7 @@ export function consult(opts) {
         text: out,
         session_id,
         total_cost_usd,
+        model_receipt: extractModelReceipt(out),
         parsed,
     };
 }

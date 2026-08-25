@@ -122,7 +122,14 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
    (subscription-billed, so this is a count and a token estimate, not a
    dollar bill), Lane C review token total, and the nodes with the highest
    combined attempts + review cycles — the ones that were actually expensive
-   to land, not just the ones that took the most wall-clock time.
+   to land, not just the ones that took the most wall-clock time. Every Lane
+   B consult's `model_receipt` (from `sage consult`'s own JSON output —
+   `lib/consult`) goes in this block too: `verified` with the model ID(s) the
+   CLI's response envelope actually named, or `unverified` when the envelope
+   carried no `modelUsage` field. Report the count of unverified consults
+   plainly rather than folding it into the total — a run of unverified
+   consults is a signal the CLI version or invocation changed underneath the
+   plugin, not something to silently average away.
 
 7. **Tune the system.** Look across `ledger.md`, board files, and
    `.sage/specialist-stats.json` for patterns: which nodes needed the most
