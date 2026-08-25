@@ -16,3 +16,7 @@ updated: YYYY-MM-DD
 ## Appendix (3–4)
 
 ## Residuals
+
+## Recommendation
+
+<action> because <path:line — the specific finding>

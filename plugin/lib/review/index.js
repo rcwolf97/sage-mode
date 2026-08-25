@@ -197,6 +197,76 @@ export function select(opts) {
 export function shouldRedTeam(scope, findings) {
     return scope.DIFF_LINES > 200 || findings.some((f) => f.severity === "CRITICAL");
 }
+// --- Recommendation check -------------------------------------------------
+//
+// gstack's model: every review artifact ends with one canonical bottom-line
+// sentence — `Recommendation: <action> because <path:line — finding>` — so a
+// human skimming a long review can find "what do I do and why" without
+// reading every finding. This lives here (not lib/lint) because it is
+// review-domain logic, not plugin-structure linting: lib/lint walks
+// SKILL.md/agents/hooks/schemas for authoring hygiene, while this module
+// already owns the Finding schema, the fingerprint format, and the
+// gate/dedup pipeline the Recommendation line is supposed to be derived
+// from. Keeping the check next to gate()/dedup()/classifyBand() means the
+// whole pipeline — findings in, Recommendation out — stays in one file.
+//
+// The citation pattern intentionally mirrors fingerprint()'s
+// `{path}:{line}:{category}` shape (loosened to just `path:line`, since the
+// recommendation prose doesn't carry a machine-readable category suffix).
+const FILE_LINE_RE = /[\w./-]+:\d+/;
+// Mirrors lib/lint's CONDUCT_PHRASES: known-generic phrases that read as
+// boilerplate rather than a real, evidenced conclusion. A hedge alone fails
+// the check; a hedge that still names a concrete path:line does not, because
+// the specific citation is what actually carries the "why" — the wording
+// around it is not load-bearing once the citation is there.
+export const GENERIC_RECOMMENDATION_PHRASES = [
+    "proceed with caution",
+    "looks fine overall",
+    "no major issues",
+    "use your judgment",
+    "looks good overall",
+    "looks good to me",
+    "no significant issues found",
+];
+// Verifies a rendered review artifact (review.md contents) has a mandatory,
+// specific `## Recommendation` line. Checks, in order:
+//   1. the section exists at all
+//   2. it isn't empty
+//   3. it cites a specific file:line
+//   4. it isn't pure generic hedging with no citation to back it
+export function checkRecommendation(reviewMarkdown) {
+    const issues = [];
+    // Slice by heading boundary rather than a single lazy-match regex: a lazy
+    // `[\s\S]*?` bounded by a lookahead on multiline `$` is ambiguous the
+    // moment the body spans more than one line (multiline `$` matches before
+    // *every* newline, so the lookahead can succeed after just the first
+    // line). Finding the heading, then the next `## ` heading (or EOF), and
+    // slicing between is unambiguous regardless of how many lines the body
+    // spans.
+    const headingRe = /^## Recommendation[ \t]*$/m;
+    const headingMatch = headingRe.exec(reviewMarkdown);
+    if (!headingMatch) {
+        issues.push("missing ## Recommendation section");
+        return { ok: false, issues };
+    }
+    const rest = reviewMarkdown.slice(headingMatch.index + headingMatch[0].length);
+    const nextHeadingMatch = /^##\s/m.exec(rest);
+    const body = (nextHeadingMatch ? rest.slice(0, nextHeadingMatch.index) : rest).trim();
+    if (!body) {
+        issues.push("## Recommendation section is empty");
+        return { ok: false, issues };
+    }
+    const hasCitation = FILE_LINE_RE.test(body);
+    if (!hasCitation) {
+        issues.push("Recommendation does not cite a specific file:line");
+    }
+    const lower = body.toLowerCase();
+    const genericHit = GENERIC_RECOMMENDATION_PHRASES.find((p) => lower.includes(p));
+    if (genericHit && !hasCitation) {
+        issues.push(`Recommendation is a generic hedge ("${genericHit}") with no specific file:line citation`);
+    }
+    return { ok: issues.length === 0, issues };
+}
 export function classifyFix(f) {
     if (f.test_stub)
         return "ASK";

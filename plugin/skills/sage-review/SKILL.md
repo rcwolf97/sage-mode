@@ -116,6 +116,22 @@ scope`), the node's acceptance criteria. **Writes:** `findings.jsonl`,
     is actually an issue" · 3–4 appendix only · 1–2 suppressed. Render to
     HTML.
 
+11. **Write the Recommendation line.** Every review ends with a mandatory
+    `## Recommendation` section: `<action> because <path:line — the specific
+    finding>`. Derive it from the merged findings **after gate and dedup have
+    run**, never before — a finding still carrying its specialist's raw
+    confidence hasn't yet been checked for evidence, and one that gate
+    capped to 5 for missing evidence, or that dedup left as a lone
+    unconfirmed claim, must not become the headline the human reads first.
+    Pick the single highest-confidence finding that survived gate + dedup
+    (ties broken toward `CRITICAL` severity) and write the recommendation
+    around it, citing its `path:line` directly. Before writing, run
+    `checkRecommendation` (`lib/review/index.ts`) against the rendered
+    markdown — it verifies the section exists, is non-empty, cites a real
+    `path:line`, and isn't pure generic hedging (see
+    `GENERIC_RECOMMENDATION_PHRASES` in that file) with nothing specific
+    behind it. A failing check means write it again, not ship it anyway.
+
 ## Common Rationalizations
 
 | Rationalization | Reality |
@@ -127,6 +143,8 @@ scope`), the node's acceptance criteria. **Writes:** `findings.jsonl`,
 | "Diff is 210 lines but it's obviously safe, skip red team" | The trigger is line count or CRITICAL, not a judgment call about how safe it looks. |
 | "One more review cycle will probably converge" | Three cycles, then stop and name the recurrences. "Probably" is not evidence of convergence. |
 | "I'll summarize the diff instead of passing the checklist path" | Passing content, not a path, defeats the point — it stays resident in your context and costs more per dispatch. |
+| "I'll base the Recommendation on the specialist's original claim, gate ran after anyway" | Gate can rewrite that finding's confidence to 5 for missing evidence. The Recommendation must be picked from the post-gate, post-dedup set, or a demoted finding becomes the headline. |
+| "The recommendation is obviously 'proceed with caution', no need to check it mechanically" | That's exactly the boilerplate `checkRecommendation` exists to catch — a generic hedge with no `path:line` fails the check by design. |
 
 ## Red Flags
 
@@ -137,10 +155,14 @@ scope`), the node's acceptance criteria. **Writes:** `findings.jsonl`,
 - Loop still applying fixes past cycle 3
 - ASK findings surfaced to the user one at a time instead of batched
 - A specialist added to the dispatch that `select` did not return
+- `## Recommendation` missing, empty, or failing `checkRecommendation`
+- Recommendation derived from a finding's pre-gate confidence or before dedup ran
 
 ## Done when
 
 `review.html` exists with confidence bands rendered, gate and dedup both ran,
 every ASK item was batched into one decision call, the loop halted at ≤3
-cycles, and any unconverged findings are named as residuals rather than
-silently dropped.
+cycles, any unconverged findings are named as residuals rather than silently
+dropped, and `## Recommendation` passes `checkRecommendation` — present,
+non-empty, citing a real `path:line`, and derived from the post-gate,
+post-dedup findings.
