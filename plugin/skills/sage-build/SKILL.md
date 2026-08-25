@@ -132,7 +132,20 @@ by the agent it governs:
 | Each revert | +15 |
 | Each fix touching more than 3 files | +5 |
 | Each fix after the 15th fix in the sprint | +1 |
+| All remaining findings are Low severity | +10 |
 | Touching a file outside any node's `owns` | +20 |
+
+This score is **computed, not narrated.** `computeWtf` in `lib/board/index.ts`
+is the formula above as a pure function; `deriveWtfSignals` feeds it from real
+repo state — revert commits and per-fix file counts from git history on each
+node's branch, out-of-lane touches by diffing those files against the node's
+`owns` globs in `dag.json`, and the Low-severity signal from `findings.jsonl`
+(never from an empty read — no findings on record is "no data," not "all
+Low"). **The Eng Manager never writes a WTF-LIKELIHOOD number into the ledger
+by hand** — the ledger's Circuit section holds whatever `evaluateCircuitBreaker`
+last computed, full stop. A number that didn't come from that call is not the
+circuit breaker, it's the exact self-report failure mode this mechanism
+exists to close.
 
 **Score > 20 → STOP.** Show the user what has been done so far and ask
 whether to continue. This is not a suggestion to wrap up soon — halt the
@@ -197,6 +210,7 @@ letting the Implementer improvise a design.
 | "I tested it manually, it's fine" | Manual testing doesn't persist past this turn. Evidence records do — run `sage evidence run`. |
 | "One more file outside the lane, it's a two-line fix" | Write a blocker. Widening a lane in secret is exactly what `sage-lane` exists to catch. |
 | "The score's at 18, I'll just finish this one fix" | The stop is at >20, not "when it feels risky." One fix that touches 4 files crosses it mid-fix. |
+| "I'll just estimate the WTF score and write it in, computing it is slower" | The number only means anything if it came from `evaluateCircuitBreaker`. A hand-written estimate is the same self-report failure this mechanism exists to close, just with a mechanical-looking label on it. |
 | "This blocker is basically a plan defect, I'll just decide" | If it's genuinely a plan defect, that's one of the four categories — escalate it, don't rule on it yourself. |
 | "The merge conflict is trivial, the Implementer can just resolve it" | Join-time conflict resolution is the Eng Manager's job specifically so the resolution gets fresh eyes. |
 
@@ -206,6 +220,7 @@ letting the Implementer improvise a design.
 - Dispatching a node id the ledger already marks `done`
 - A node marked `done` with no evidence record
 - WTF-likelihood score above 20 with no stop-and-ask
+- A WTF-LIKELIHOOD value in the ledger that didn't come from `evaluateCircuitBreaker`
 - More than 50 fixes in the sprint
 - An Implementer guessing on an out-of-lane need instead of writing a blocker
 - A blocker in one of the four escalation categories ruled on without asking the user

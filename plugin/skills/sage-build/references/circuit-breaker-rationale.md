@@ -7,17 +7,34 @@ weighted the way it is.
 ## Why mechanical signals, not judgment
 
 The score in `SKILL.md` step 6 is deliberately built only from countable
-facts — reverts, files touched per fix, fix count, out-of-lane touches. None
-of it asks "does this feel like it's going off the rails," because that
-question is exactly the one an agent under time pressure will answer wrong in
-its own favor. A purely mechanical score can't be argued down by the same
-process it's meant to catch.
+facts — reverts, files touched per fix, fix count, findings severity,
+out-of-lane touches. None of it asks "does this feel like it's going off the
+rails," because that question is exactly the one an agent under time pressure
+will answer wrong in its own favor. A purely mechanical score can't be argued
+down by the same process it's meant to catch.
+
+Concretely, this is `computeWtf` in `lib/board/index.ts`: a pure function of
+a `WtfSignals` struct, so it can be unit-tested with hand-built counts the
+same way `lib/dag/index.ts`'s `globIntersect` is tested against explicit
+`treePaths` instead of a real checkout. `deriveWtfSignals` is the part that
+touches a real sprint — it counts revert commits and per-fix file counts from
+`git log`/`git diff-tree` on each node's own branch, checks each touched file
+against that node's `owns` globs from `dag.json` for the out-of-lane signal,
+and reads `findings.jsonl` for the Low-severity signal. **None of those three
+sources is the build-loop agent describing its own work** — git history and
+`dag.json` are structural facts, and `findings.jsonl` is the *reviewer's*
+structured output about the code, not the implementer's narrative about
+itself. That last distinction matters: the old implementation's failure
+wasn't "an LLM was involved somewhere upstream of the number," it was that
+the same agent being graded was the one filling in the grade. Swapping in a
+different subagent's structured, schema-conformant output is not that
+failure mode.
 
 ## Why each signal is weighted the way it is
 
 - **Revert (+15), the heaviest single signal.** A revert means a fix already
   landed and then had to be undone — the most direct evidence available that
-  a "done" claim was wrong. Three reverts alone crosses the stop threshold,
+  a "done" claim was wrong. Two reverts alone crosses the stop threshold,
   which is intentional: a sprint reverting its own fixes repeatedly is
   thrashing, not converging.
 - **A fix touching more than 3 files (+5).** Not a hard rule that fixes must
@@ -28,6 +45,17 @@ process it's meant to catch.
   15 fixes to converge is already unusual; every fix past that point is
   weighted as a small, accumulating sign that the underlying issue isn't a
   fix problem but a plan or approach problem.
+- **All remaining findings are Low severity (+10).** Sourced from
+  `findings.jsonl`'s `NITPICK` band — this schema's lowest tier, and the
+  mechanical stand-in for "Low" (see `lib/review/index.ts`'s `Finding`
+  type). This is not a penalty for having nitpicks; it fires only when
+  *everything left* is a nitpick, which is the moment a fix loop has stopped
+  fixing bugs and started grinding on cosmetics. That's autonomous-continue
+  territory turning into "is this worth the tokens," which is exactly the
+  kind of call this mechanism exists to surface rather than let the loop
+  decide for itself. It requires at least one recorded finding — an empty or
+  missing `findings.jsonl` is "no data" and contributes nothing, never "all
+  Low" by default.
 - **Touching a file outside any node's `owns` (+20), the single largest
   signal.** This is the lane boundary being crossed entirely outside the
   amendment process — by construction it should never happen if blockers are

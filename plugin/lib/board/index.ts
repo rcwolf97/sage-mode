@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { git, gitRoot, projectSageDir } from "../util.js";
+import { type Dag, loadDag, expandAgainstTree } from "../dag/index.js";
+import { type Finding, parseJsonl } from "../review/index.js";
 
 export type NodeStatus =
   | "pending"
@@ -228,6 +230,233 @@ export function activeSprint(root?: string): string | null {
   return dirs.at(-1) || null;
 }
 
-void git;
-void gitRoot;
-void existsSync;
+// ---------------------------------------------------------------------------
+// Circuit breaker: WTF-likelihood score
+// ---------------------------------------------------------------------------
+//
+// Ported from gstack's mechanical scope-creep score — see
+// skills/sage-build/references/circuit-breaker-rationale.md for the "why"
+// behind each weight. The property gstack established, and the one the
+// previous implementation here violated: none of these signals are a
+// judgment call made by the agent the breaker governs. Every input is
+// either counted from real git history, cross-checked against dag.json's
+// declared `owns` globs, or read from a schema-conforming JSONL artifact a
+// *different* process (the reviewer) wrote for reasons that have nothing to
+// do with this score. `computeWtf` is a pure function of those counts —
+// hand-built numbers in a test are indistinguishable from a real sprint's,
+// which is exactly what makes the score auditable.
+//
+// The previous implementation was
+// `Number(text.match(/WTF-LIKELIHOOD:\s*(\d+)/)?.[1] || 0)` — parsing a
+// number out of the ledger's own Circuit section. But nothing anywhere
+// computed that number; it could only ever have gotten there by an agent
+// (the Eng Manager persona `/sage-build` runs) writing it in by hand. That
+// is textual self-report wearing a mechanical costume. This section
+// replaces it: from here on, `l.wtf` must only ever be set from
+// `computeWtf(...).score` (typically via `evaluateCircuitBreaker`), never
+// typed in directly. No parallel "agent-reported" field is kept — the old
+// WTF-LIKELIHOOD line *was* the self-report; keeping a second copy of the
+// same free-text number under an "advisory" label would just be the same
+// problem wearing an apologetic disclaimer.
+
+/** Mechanically-derived inputs to the WTF-likelihood formula. Every field is
+ * a count or boolean sourced from git history, dag.json, or findings.jsonl
+ * — see `deriveWtfSignals` for exactly how each is produced from real repo
+ * state. This type is kept separate from `deriveWtfSignals` specifically so
+ * `computeWtf` can be unit-tested with hand-built numbers, the same way
+ * lib/dag/index.ts's `globIntersect` takes an explicit `treePaths` argument
+ * instead of always shelling out to `git ls-files`. */
+export interface WtfSignals {
+  /** Commits mechanically identified as reverts: either git's own
+   * auto-generated `Revert "..."` subject line, or the `This reverts commit
+   * <sha>` trailer `git revert` writes into the commit body. Both are
+   * things git itself writes when `git revert` runs — never free text an
+   * agent composes describing its own work. */
+  reverts: number;
+  /** Non-revert commits ("fixes" — see `totalFixes`) whose
+   * `git diff-tree --name-only` touched more than 3 files. */
+  fixesOverThreeFiles: number;
+  /** Total fix commits landed in the sprint so far, across every node's
+   * branch, revert commits included (a revert is still an iteration of the
+   * loop, not a no-op). One commit == one fix, per the Implementer
+   * contract in skills/sage-build/SKILL.md step 3 ("Commit, one commit per
+   * acceptance criterion"). */
+  totalFixes: number;
+  /** True only when findings.jsonl for this sprint has at least one finding
+   * recorded and every one of them is NITPICK severity — the lowest band
+   * lib/review/index.ts's `Finding` type defines, and the mechanical
+   * stand-in for gstack's "Low" (this schema has no literal "Low" tier).
+   * Missing, empty, or unparsable findings.jsonl is treated as "no data"
+   * and returns false, never true — a node with zero recorded findings is
+   * not evidence that "everything remaining is low severity", it's absence
+   * of evidence either way. */
+  allRemainingFindingsLow: boolean;
+  /** Distinct (node, file) pairs where a file a node's branch touched does
+   * not match any glob in that node's `owns` from dag.json. */
+  outOfLaneTouches: number;
+}
+
+export interface WtfBreakdown {
+  revertPoints: number;
+  fileSpreadPoints: number;
+  fixCountPoints: number;
+  lowFindingsPoints: number;
+  outOfLanePoints: number;
+}
+
+export interface WtfResult {
+  /** Total score, in the same percentage-point units SKILL.md's table uses
+   * (e.g. 30 means "30%"). */
+  score: number;
+  breakdown: WtfBreakdown;
+  /** score > 20 — SKILL.md step 6's stop-and-ask threshold. Strictly
+   * greater-than: a score that lands exactly on 20 does not trip it. */
+  stopAndAsk: boolean;
+  /** totalFixes >= 50 — the hard cap, independent of score. */
+  hardCapReached: boolean;
+}
+
+/** gstack's exact formula (skills/sage-build/SKILL.md step 6), as a pure
+ * function: start at 0, +15 per revert, +5 per fix touching more than 3
+ * files, +1 per fix after the 15th, +10 if every remaining finding is Low
+ * severity, +20 per out-of-lane file touch. No signal here is a judgment
+ * call — see `WtfSignals` for how each is mechanically sourced when this is
+ * called via `evaluateCircuitBreaker`/`deriveWtfSignals` against a real
+ * sprint. */
+export function computeWtf(signals: WtfSignals): WtfResult {
+  const revertPoints = signals.reverts * 15;
+  const fileSpreadPoints = signals.fixesOverThreeFiles * 5;
+  const fixCountPoints = Math.max(0, signals.totalFixes - 15) * 1;
+  const lowFindingsPoints = signals.allRemainingFindingsLow ? 10 : 0;
+  const outOfLanePoints = signals.outOfLaneTouches * 20;
+  const score = revertPoints + fileSpreadPoints + fixCountPoints + lowFindingsPoints + outOfLanePoints;
+  return {
+    score,
+    breakdown: { revertPoints, fileSpreadPoints, fixCountPoints, lowFindingsPoints, outOfLanePoints },
+    stopAndAsk: score > 20,
+    hardCapReached: signals.totalFixes >= 50,
+  };
+}
+
+// git's own auto-generated revert subject (`git revert` with `--edit`
+// defaults to `Revert "<original subject>"`) and its auto-inserted body
+// trailer (present whether or not the subject was edited). Matching either
+// is matching something git itself wrote, not something the agent typed.
+const REVERT_SUBJECT = /^revert\b/i;
+const REVERT_TRAILER = /^this reverts commit [0-9a-f]{7,40}\.?\s*$/im;
+
+/** Pulls `WtfSignals` from real repo state: per-node branches (the
+ * `sprint/<sprint>-<id>` convention lib/dag/index.ts's `worktree()`
+ * function creates), dag.json's declared `owns` globs, and the sprint's
+ * findings.jsonl. Best-effort and fails closed toward zero signals — never
+ * throws. A node whose branch no longer exists (deleted after a clean join,
+ * or never dispatched yet) or a dag.json that fails to load simply
+ * contributes nothing, exactly like a node that hasn't built anything. */
+export function deriveWtfSignals(l: Ledger, root?: string): WtfSignals {
+  const cwd = root || gitRoot() || process.cwd();
+
+  let dag: Dag | null = null;
+  if (l.plan) {
+    const dagPath = isAbsolute(l.plan) ? l.plan : join(cwd, l.plan);
+    try {
+      if (existsSync(dagPath)) dag = loadDag(dagPath);
+    } catch {
+      dag = null;
+    }
+  }
+
+  const nodeIds = dag ? dag.nodes.map((n) => n.id) : Object.keys(l.nodes);
+
+  let reverts = 0;
+  let fixesOverThreeFiles = 0;
+  let totalFixes = 0;
+  let outOfLaneTouches = 0;
+
+  for (const id of nodeIds) {
+    const node = dag?.nodes.find((n) => n.id === id);
+    // Per-node branch naming convention from lib/dag/index.ts's worktree():
+    // `git worktree add -B sprint/${dag.sprint}-${nodeId} dir dag.base`.
+    const branch = `sprint/${l.sprint}-${id}`;
+    if (!l.base || git(["rev-parse", "--verify", branch], cwd).status !== 0) continue;
+
+    const log = git(["log", "--reverse", "--format=%H", `${l.base}..${branch}`], cwd);
+    if (log.status !== 0) continue;
+    const shas = log.stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    for (const sha of shas) {
+      totalFixes++;
+      const msg = git(["show", "-s", "--format=%B", sha], cwd).stdout;
+      const subject = msg.split("\n")[0] || "";
+      if (REVERT_SUBJECT.test(subject) || REVERT_TRAILER.test(msg)) {
+        reverts++;
+        continue;
+      }
+      const diff = git(["diff-tree", "--no-commit-id", "--name-only", "-r", sha], cwd);
+      const files = diff.stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (files.length > 3) fixesOverThreeFiles++;
+      if (node) {
+        for (const f of files) {
+          const inLane = node.owns.some((g) => expandAgainstTree(g, [f]).includes(f));
+          if (!inLane) outOfLaneTouches++;
+        }
+      }
+    }
+  }
+
+  return {
+    reverts,
+    fixesOverThreeFiles,
+    totalFixes,
+    allRemainingFindingsLow: remainingFindingsAllLow(l.sprint, cwd),
+    outOfLaneTouches,
+  };
+}
+
+/** Path to the sprint's findings.jsonl. Design choice: co-located with
+ * ledger.md/board/ under `.sage/sprints/<sprint>/`, matching where
+ * evidence.jsonl already lives per agents/implementer-*.md ("Evidence
+ * record via `sage evidence run` (`.sage/sprints/NN/evidence.jsonl`)") —
+ * findings.jsonl is the same kind of internal, machine-written JSONL
+ * artifact, distinct from the rendered docs/sprints/NN-<slug>/review.{md,html}
+ * meant for humans. If a future sage-review revision writes findings.jsonl
+ * somewhere else, this is the one place to update. */
+export function findingsPath(sprint: string, root?: string): string {
+  return join(projectSageDir(root), "sprints", sprint, "findings.jsonl");
+}
+
+// findings.jsonl carries no resolved/fixed flag in its schema (see
+// lib/review/index.ts's Finding type), so this reads the file's *current*
+// contents as the remaining set — valid as long as sage-review overwrites
+// (rather than appends to) the file on each re-review pass, which is the
+// existing fix-cycle contract in skills/sage-build/SKILL.md step 4
+// ("findings loop back to the Implementer for a fix; bound fix cycles at
+// 3"). An empty or missing file means "no data", not "all low" — it must
+// NOT award the +10% just because nothing has been recorded yet, or every
+// freshly-reviewed node with zero findings would trip the signal for no
+// reason.
+function remainingFindingsAllLow(sprint: string, root?: string): boolean {
+  const p = findingsPath(sprint, root);
+  if (!existsSync(p)) return false;
+  let findings: Finding[];
+  try {
+    findings = parseJsonl(readFileSync(p, "utf8"));
+  } catch {
+    return false;
+  }
+  if (findings.length === 0) return false;
+  return findings.every((f) => f.severity === "NITPICK");
+}
+
+/** One-call convenience: derive signals from real repo state, then score
+ * them. This is the mechanism skills/sage-build/SKILL.md step 6 refers to —
+ * the Eng Manager must call this rather than writing a number into the
+ * ledger's Circuit section by hand. */
+export function evaluateCircuitBreaker(l: Ledger, root?: string): WtfResult {
+  return computeWtf(deriveWtfSignals(l, root));
+}
