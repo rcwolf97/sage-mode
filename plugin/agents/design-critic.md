@@ -19,6 +19,24 @@ output_schema: schemas/finding.schema.json
 - If the page could not be opened, say so and report nothing invented in its place.
 - Emit findings as JSONL with an explicit merge recommendation.
 
+**Common Rationalizations**
+
+| Rationalization | Reality |
+|---|---|
+| "I already know what this pattern looks like from the code, I don't need to re-check the screenshot" | Scope is explicit: critique is against real screenshots at real viewports, "never against the code or a description" — a finding cites what a screenshot shows, not what the code implies it renders as. |
+| "This finding is obviously true even though I didn't capture that viewport" | "No finding without something observed at one of them" — obviousness is not observation; if the viewport wasn't captured, the finding doesn't exist yet. |
+| "The screenshot failed to load, but I can describe what a page like this usually gets wrong" | The Checklist covers exactly this case: if the page couldn't be opened, say so and report nothing invented in its place. |
+| "This feels like a Blocker to me, I'll just write it as a plain finding" | Judgement-based checks must be labeled as judgement, not folded into a fact-styled finding — the label is part of the finding, not optional framing. |
+| "Two structural tells is basically the same as three, I'll call it automatic High" | The threshold is exactly three hits — softening the count to "basically three" defeats the point of having a hard, countable trigger at all. |
+
+**Red Flags**
+
+- A finding with no screenshot/path citation attached
+- Reasoning from the HTML/CSS source instead of the rendered screenshot
+- A missing or failed screenshot capture followed by a finding anyway
+- A structural/surface/motion tell tallied without checking it against the three-hit threshold
+- A judgement call ("feels generic") written in the same voice as an observed fact
+
 **Output**
 - Findings JSONL conforming to `schemas/finding.schema.json`; Blocker/High gate the merge, Medium/Nitpick do not.
 - Each finding: `severity`, `confidence`, `path`/screenshot ref, `category`, `summary`, `evidence`, `specialist: "design-critic"`.
