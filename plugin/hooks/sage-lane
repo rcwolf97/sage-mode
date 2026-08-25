@@ -66,7 +66,16 @@ def matches(rel: str, g: str) -> bool:
     if g.startswith("./"):
         g = g[2:]
     g = g.replace("\\", "/")
-    rel = rel.replace("\\", "/")
+    # Do NOT rewrite backslashes in `rel` — unlike `g` (a declared glob
+    # pattern, reasonable to normalize), `rel` is the real, already-resolved
+    # filesystem path. A backslash is a legal POSIX filename character, not a
+    # separator; realpath() never treats it as one. An adversarial test found
+    # that rewriting it here turned a single flat file literally named
+    # `src\api\pwned.ts` sitting at the project root into what looked like
+    # the 3-segment nested path `src/api/pwned.ts` for matching purposes —
+    # making a file genuinely outside the lane match an `owns` glob like
+    # `src/api/**` and get allowed. The node branch never had this bug (it
+    # only normalizes `g`, never `rel`); this now matches that.
     if g.endswith("/**"):
         prefix = g[:-3].rstrip("/")
         return rel == prefix or rel.startswith(prefix + "/")

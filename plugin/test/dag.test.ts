@@ -149,6 +149,78 @@ test("globIntersect correctly rejects `?` against a literal of the wrong length"
   assert.equal(globIntersect("src/c?.ts", "src/ab.ts", []), false);
 });
 
+// Brace-expansion adversarial cases. Neither globToRegExp here nor
+// hooks/sage-lane's runtime matcher implement shell-style `{a,b}` expansion —
+// `{`/`}`/`,` all fall through to literal-character handling (the escape
+// list covers `{`/`}` as regex metachars but not as glob syntax). That's
+// safe rather than silently wrong specifically because it's consistent with
+// the runtime enforcer: an owns glob written with brace syntax is treated as
+// a literal string on both sides of the boundary, so it never diverges into
+// "conflict detector says safe, enforcer denies the write" or vice versa.
+test("globIntersect treats {a,b} as a literal string, not shell-style expansion — no false positive against a real src/a.ts in the tree", () => {
+  const tree = ["src/a.ts", "src/b.ts"];
+  assert.equal(globIntersect("src/{a,b}.ts", "src/a.ts", tree), false);
+});
+
+test("globIntersect treats {a,b} as a literal string on an empty tree too (fallback path agrees with the tree-expansion path)", () => {
+  assert.equal(globIntersect("src/{a,b}.ts", "src/a.ts", []), false);
+});
+
+test("globIntersect matches a real file that is literally named with braces against a wildcard that also matches that literal name", () => {
+  const tree = ["src/{a,b}.ts"];
+  assert.equal(globIntersect("src/{a,b}.ts", "src/*.ts", tree), true);
+});
+
+// Doubled/nested ** shapes. globToRegExp's `**` handling only special-cases
+// a single `**` segment plus an optional following `/`; two `**` segments in
+// a row re-enter that branch twice and should collapse to the same language
+// as a single `**` (zero or more segments) rather than accidentally
+// requiring at least one segment per star, or leaving a stray literal `*`
+// that would narrow the match.
+test("globIntersect handles doubled ** (a/**/**/b) matching multiple segments between a and b, same as a single **", () => {
+  const tree = ["a/x/y/b"];
+  assert.equal(globIntersect("a/**/**/b", "a/x/y/b", tree), true);
+});
+
+test("globIntersect handles doubled ** (a/**/**/b) collapsing to zero segments — matches a/b directly, doesn't require one segment per star", () => {
+  const tree = ["a/b"];
+  assert.equal(globIntersect("a/**/**/b", "a/b", tree), true);
+});
+
+test("globIntersect handles doubled ** (a/**/**/b) on an empty tree via the pattern-only fallback, same result as the tree-expansion path", () => {
+  assert.equal(globIntersect("a/**/**/b", "a/x/y/b", []), true);
+});
+
+test("globIntersect: a bare **/** matches everything, same as a single **, not requiring two path segments", () => {
+  const tree = ["anything/here.ts"];
+  assert.equal(globIntersect("**/**", "anything/here.ts", tree), true);
+});
+
+// Glob-vs-glob intersection: both sides are open patterns, not a literal
+// file on one side. Most existing coverage above is glob-vs-literal-path;
+// these exercise the tree-expansion primary path when BOTH matchesA and
+// matchesB come from wildcard expansion.
+test("globIntersect on a real tree: src/*.ts (open) intersects src/** (open) through a shared concrete file, not just a literal path", () => {
+  const tree = ["src/api.ts", "src/nested/deep.ts"];
+  assert.equal(globIntersect("src/*.ts", "src/**", tree), true);
+});
+
+test("globIntersect on a real tree correctly rejects two open patterns with disjoint extensions once concrete files show they never overlap: src/*.ts vs src/*.js", () => {
+  const tree = ["src/api.ts", "src/other.js"];
+  assert.equal(globIntersect("src/*.ts", "src/*.js", tree), false);
+});
+
+test("globIntersect on a real tree correctly rejects two open patterns rooted in different directories: src/*.ts vs lib/*.ts", () => {
+  const tree = ["src/api.ts", "lib/util.ts"];
+  assert.equal(globIntersect("src/*.ts", "lib/*.ts", tree), false);
+});
+
+test("globIntersect: a character-class open pattern (src/[ab]*.ts) intersects a recursive open pattern (src/**/*.ts) through a shared file, on tree and fallback alike", () => {
+  const tree = ["src/api.ts"];
+  assert.equal(globIntersect("src/[ab]*.ts", "src/**/*.ts", tree), true);
+  assert.equal(globIntersect("src/[ab]*.ts", "src/**/*.ts", []), true);
+});
+
 test("dag validate rejects a cycle, unknown depends_on, and owns **", () => {
   const cycle: Dag = {
     ...base,

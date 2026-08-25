@@ -115,10 +115,17 @@ if [ "$IS_SIMPLE" = 1 ]; then
         case "$tok" in *f*|*F*) HAS_F=1 ;; esac
         ;;
     esac
+    # Quoted variants (rm -rf "/" or rm -rf '/') matter here: word-splitting
+    # $CMD does NOT strip quote characters from the resulting tokens (quote
+    # removal only happens on the original parse, not on a second unquoted
+    # expansion) — so a quoted root is a literal 3-character token `"/"` or
+    # `'/'`, not a 1-character `/`. An adversarial test caught this falling
+    # through to the weaker MEDIUM ask tier instead of HIGH deny. $HOME's
+    # quoted form was already covered ('"$HOME"'); root and /* were not.
     case "$tok" in
-      '/') TARGET_ROOT=1 ;;
+      '/'|'"/"'|"'/'") TARGET_ROOT=1 ;;
       '~'|'~/'|'$HOME'|'"$HOME"'|'~/*') TARGET_HOME=1 ;;
-      '/*') TARGET_ROOTSTAR=1 ;;
+      '/*'|'"/*"'|"'/*'") TARGET_ROOTSTAR=1 ;;
     esac
   done
   # -f is not required to deny: the original literal-pattern list already
@@ -131,16 +138,36 @@ if [ "$IS_SIMPLE" = 1 ]; then
     [ "$TARGET_HOME" = 1 ] && deny "[careful] Refusing recursive delete of home."
     [ "$TARGET_ROOTSTAR" = 1 ] && deny "[careful] Refusing recursive delete of /*."
   fi
-  # force-push to default branch
-  case "$CMD" in
-    *'git push --force'*|*'git push -f '*)
+  # force-push to default branch — token-aware, mirrors the rm -rf detection
+  # above. An adversarial test found the previous literal-substring check
+  # ('git push --force' / 'git push -f ' with a trailing space) missed a
+  # force flag bundled into a short-option cluster, e.g. `git push -uf origin
+  # main` — that command force-pushes to main but matched neither pattern,
+  # so it got neither a deny nor even the MEDIUM ask fallback. Detect the
+  # force flag the same way -r/-f are detected for rm: scan every token's
+  # short-option cluster, not just a couple of literal spellings.
+  IS_GIT_PUSH=0
+  case "$CMD_TOK1" in
+    git) case "$CMD_TOK2" in push) IS_GIT_PUSH=1 ;; esac ;;
+  esac
+  if [ "$IS_GIT_PUSH" = 1 ]; then
+    HAS_FORCE=0
+    for tok in "$@"; do
+      case "$tok" in
+        --force|--force-with-lease|--force-with-lease=*) HAS_FORCE=1 ;;
+        --*) : ;;
+        -?*) case "$tok" in *f*) HAS_FORCE=1 ;; esac ;;
+      esac
+    done
+    if [ "$HAS_FORCE" = 1 ]; then
       DEF=$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@origin/@@')
       [ -n "$DEF" ] || DEF=main
       case "$CMD" in
         *" $DEF"*|*origin/$DEF*|*"HEAD:$DEF"*) deny "[careful] Force-push to default branch ($DEF) denied." ;;
       esac
-      ;;
-  esac
+      ask "[careful] Destructive command. Confirm to proceed."
+    fi
+  fi
 fi
 
 # MEDIUM — always ask

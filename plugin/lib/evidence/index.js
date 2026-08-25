@@ -56,6 +56,44 @@ export function wtree(cwd) {
         }
     }
 }
+// A sharper TOCTOU guard than wtree() alone can provide. wtree() is
+// content-addressed by design (that's what makes it survive an identical
+// re-commit or a rebase) — but that same property makes it blind to a
+// mutate-then-revert-to-identical-content race: a test command that writes
+// different content to a tracked file mid-run and then writes the original
+// content back before exiting produces before === after on content alone,
+// even though whatever the test actually observed and asserted against
+// mid-run was the mutated version, not the tree state being certified.
+// mtime is not content-addressed — a real write syscall updates it even when
+// the final bytes match the original — so comparing a fingerprint of every
+// tracked file's mtime, in addition to the tree hash, catches exactly this
+// case. Deliberately conservative: this can flag a run STALE even when a
+// tracked file was touched and rewritten with genuinely identical content
+// for an unrelated, benign reason. That tradeoff is intentional and matches
+// this plugin's stated philosophy elsewhere (lib/dag's lane-overlap check:
+// "false positives are acceptable; false negatives are not") — an
+// occasional redundant re-run costs little; a false FRESH on evidence the
+// suite never actually ran against costs a lot.
+function trackedMtimeFingerprint(cwd) {
+    const root = gitRoot(cwd);
+    if (!root)
+        return null;
+    const ls = git(["ls-files"], root);
+    if (ls.status !== 0)
+        return null;
+    const files = (ls.stdout || "").split("\n").filter(Boolean);
+    const parts = [];
+    for (const f of files) {
+        try {
+            const st = statSync(join(root, f));
+            parts.push(`${f}:${st.mtimeMs}`);
+        }
+        catch {
+            parts.push(`${f}:missing`);
+        }
+    }
+    return sha256(parts.sort().join("\n"));
+}
 export function evidencePath(root, sprintId) {
     const sage = projectSageDir(root);
     const sprint = activeSprintDir(root, sprintId);
@@ -106,6 +144,7 @@ export function readEvidence(root, sprintId) {
 export async function run(opts) {
     const cwd = opts.cwd || process.cwd();
     const before = wtree(cwd);
+    const beforeMtime = trackedMtimeFingerprint(cwd);
     const started = Date.now();
     const cmdStr = opts.command.join(" ");
     const cmdHash = sha256(cmdStr);
@@ -158,6 +197,7 @@ export async function run(opts) {
     if (fd !== undefined)
         closeSync(fd);
     const after = wtree(cwd);
+    const afterMtime = trackedMtimeFingerprint(cwd);
     const commit = git(["rev-parse", "--short", "HEAD"], cwd).stdout.trim();
     const dirty = git(["status", "--porcelain"], cwd).stdout.trim().length > 0;
     const rec = {
@@ -172,8 +212,13 @@ export async function run(opts) {
         log_path: logPath,
         node: opts.node,
     };
-    if (before && after && before === after)
+    // Both fingerprints must agree the tree was untouched: content (wtree)
+    // AND mtime (trackedMtimeFingerprint, the TOCTOU-sharpening check above).
+    // A mutate-then-revert-to-identical-content race passes the content check
+    // but fails the mtime one, so it's still correctly refused here.
+    if (before && after && before === after && beforeMtime && afterMtime && beforeMtime === afterMtime) {
         rec.wtree = after;
+    }
     try {
         const ledger = join(sprint, "evidence.jsonl");
         mkdirSync(dirname(ledger), { recursive: true });
