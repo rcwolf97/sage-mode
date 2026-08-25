@@ -7,6 +7,7 @@ applies_when: "when this situation recurs"
 severity: medium
 sprint: "NN"
 created: YYYY-MM-DD
+last_confirmed: "NN"
 ---
 
 ## What happened

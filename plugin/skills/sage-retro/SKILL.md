@@ -52,6 +52,7 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
    severity: <low|medium|high>
    sprint: "<NN>"
    created: <date>
+   last_confirmed: "<NN>"
    ---
    ## What happened
    ## Why it happened
@@ -59,17 +60,71 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
    ## How we'd detect it earlier
    ```
 
-4. **Update the roadmap.** `docs/roadmap.md` status column: which items
+4. **Re-check a small, bounded sample of existing learnings for staleness.**
+   A learning written months ago can quietly go wrong — "always do X because
+   service Y doesn't support Z" stops being true the day service Y ships Z,
+   and nothing re-checks it unless something forces the question. This step
+   is that force, kept cheap on purpose: it rides along on the sprint you're
+   already retro-ing, using the touched-files context you already gathered
+   in step 2, instead of being a separate pass someone has to remember to
+   run. (This is deliberately not the full-corpus Keep/Update/Consolidate/
+   Replace/Delete sweep some other systems run as a standalone periodic
+   skill — that shape is easy to skip and, by its own maintainers' account,
+   often is. Bolting a small check onto a step that already runs is the fix.)
+
+   **The bound is hard: at most 3 learnings re-checked per retro.** Select
+   them like this:
+   - Build a candidate pool with `sage recall "<areas/files touched this
+     sprint>" --kind learning --json` (one or two queries built from the
+     categories and paths already in hand from step 2 — not a query built
+     to be maximally broad). This is a relevance filter, not the selection
+     itself: it exists so the corpus you even look at is already narrowed to
+     what's plausibly relevant, not "every learning that exists."
+   - From that candidate pool, open each hit's frontmatter and drop any
+     whose `applies_when` or `tags` don't genuinely plausibly bear on what
+     changed this sprint — a recall hit is a relevance signal, not a
+     guarantee.
+   - Of what's left, take the **3 with the oldest `last_confirmed`** (a
+     learning that has never been re-confirmed since creation — where
+     `last_confirmed` still equals its original `sprint` value — sorts as
+     the oldest of all, ahead of anything already bumped once). Fewer than 3
+     genuinely relevant candidates exist → re-check only those; zero → this
+     step is a no-op this retro, same as "nothing notable" shortens step 3.
+     Never pad the sample up to 3 with a weak or unrelated match just to use
+     the full budget.
+
+   For each of the (at most 3) sampled learnings, ask directly: **does this
+   still hold, given what actually changed this sprint?** Answer it from
+   what you already read in step 2 — the sprint's actual diffs and board
+   files — not from general reasoning about whether it sounds plausible.
+
+   - **Still holds** → bump `last_confirmed` to this sprint's id. Nothing
+     else changes — `created` stays at the original write date, the body
+     is untouched. This is a metadata-only edit, not a rewrite.
+   - **No longer holds** → never delete the file. Set `status: superseded`
+     in its frontmatter — the same convention step 5's roadmap rows use for
+     a plan that changed, not a bespoke one for learnings — and add one line
+     directly under the frontmatter, before "## What happened":
+     `> **Superseded (sprint <NN>):** <what changed, in one sentence, and
+     what's true now instead>`. The old body stays in place below it as a
+     record of what was believed and why, the same way a superseded roadmap
+     row keeps its original text rather than being blanked.
+
+   See `references/learning-format.md` (trigger: re-checking a sampled
+   learning, or unsure whether a change to what changed this sprint is
+   enough to supersede vs. just reconfirm) for the full field documentation.
+
+5. **Update the roadmap.** `docs/roadmap.md` status column: which items
    shipped, which slipped (and to where), which changed scope. Amend, don't
    delete — mark superseded rows rather than removing history.
 
-5. **Report cost.** Pull the sprint's ledger Cost block: Lane B consult count
+6. **Report cost.** Pull the sprint's ledger Cost block: Lane B consult count
    (subscription-billed, so this is a count and a token estimate, not a
    dollar bill), Lane C review token total, and the nodes with the highest
    combined attempts + review cycles — the ones that were actually expensive
    to land, not just the ones that took the most wall-clock time.
 
-6. **Tune the system.** Look across `ledger.md`, board files, and
+7. **Tune the system.** Look across `ledger.md`, board files, and
    `.sage/specialist-stats.json` for patterns: which nodes needed the most
    review rounds, which briefs produced a blocker (a sign the brief was
    ambiguous, not that the implementer was slow), which model tier was under-
@@ -80,7 +135,7 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
    rationalization observed is a candidate row for the relevant skill's
    Common Rationalizations table.
 
-7. **Emit a tuning diff, gated.** Write the proposed change as an actual
+8. **Emit a tuning diff, gated.** Write the proposed change as an actual
    diff against the skill file it touches — not a description of a change —
    and put it behind a decision brief (`rules/sage-conduct.mdc`, not restated
    here). **Never apply tuning silently**, even when it looks obviously
@@ -98,6 +153,8 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
 | "The rationalization table entry is close enough to one I remember" | Pull it from the actual transcript or blocker text. An invented entry defeats the point of the table being real. |
 | "Dedup came back just under threshold, close enough to be the same" | Under threshold means write new. If it's genuinely the same problem, the `applies_when` text needs sharpening, not the threshold ignored. |
 | "The index re-render can wait until something actually changed" | It's unconditional every retro. A skipped render this week is a stale index the next sprint's recall silently serves. |
+| "The staleness re-check is extra work with no notable problem attached, I'll skip it" | It's not optional and it's not big: at most 3 learnings, chosen from this sprint's already-gathered context. Skipping it is exactly how a six-month-stale learning keeps getting served as current advice. |
+| "I'm already in the learnings this sprint, might as well sweep the whole corpus while I'm in there" | The bound is 3, not "however many look worth checking." A full-corpus sweep is the enormous-prompt-surface, easy-to-neglect shape this step was designed to avoid — that's a separate, heavier procedure, not a bigger version of this one. |
 
 ## Red Flags
 
@@ -107,10 +164,16 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
 - Cost block omitted because "nothing shipped"
 - A rationalization-table entry that doesn't trace to an actual transcript or blocker
 - Roadmap rows deleted instead of marked superseded
+- Staleness re-check skipped entirely with no candidate pool even considered
+- More than 3 learnings re-checked for staleness in one retro
+- `last_confirmed` bumped on a learning without actually weighing it against what changed this sprint
+- A learning file deleted, or its body wiped, instead of marked `status: superseded` with the old text left in place
 
 ## Done when
 
-Learnings are written or updated with no duplicates, the notebook is
-re-rendered and re-indexed, the roadmap reflects shipped/slipped/changed,
-cost is reported per lane, and the tuning diff is written and gated behind an
+Learnings are written or updated with no duplicates, up to 3 sprint-relevant
+existing learnings have been re-checked for staleness with `last_confirmed`
+bumped or `status: superseded` set accordingly, the notebook is re-rendered
+and re-indexed, the roadmap reflects shipped/slipped/changed, cost is
+reported per lane, and the tuning diff is written and gated behind an
 explicit user decision rather than applied.
