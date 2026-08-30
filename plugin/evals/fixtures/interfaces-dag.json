@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "sprint": "01-interfaces",
+  "base": "main",
+  "constraints": [
+    "Every API response must include a request-id header on every route.",
+    "Do not introduce new runtime dependencies without approval."
+  ],
+  "nodes": [
+    {
+      "id": "n1",
+      "title": "Auth token verification service",
+      "role": "backend",
+      "owns": ["src/auth/**"],
+      "acceptance": ["verifyToken(token) returns a decoded claims object for a valid JWT"],
+      "verify": "npm test",
+      "risk": "low",
+      "interfaces": { "produces": ["auth.verifyToken"] }
+    },
+    {
+      "id": "n2",
+      "title": "Protected profile API route",
+      "role": "backend",
+      "depends_on": ["n1"],
+      "owns": ["src/api/**"],
+      "acceptance": ["GET /profile returns 401 when auth.verifyToken rejects the bearer token"],
+      "verify": "npm test",
+      "risk": "low",
+      "interfaces": { "consumes": ["auth.verifyToken"], "produces": ["api.profile"] }
+    },
+    {
+      "id": "n3",
+      "title": "Frontend profile page",
+      "role": "frontend",
+      "depends_on": ["n2"],
+      "owns": ["src/ui/**"],
+      "acceptance": ["The profile page renders the api.profile fields for a signed-in user"],
+      "verify": "npm test",
+      "risk": "low",
+      "interfaces": { "consumes": ["api.profile"] }
+    }
+  ]
+}

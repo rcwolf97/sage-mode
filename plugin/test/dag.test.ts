@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validate, plan, lanes, globIntersect, type Dag } from "../lib/dag/index.js";
+import { join } from "node:path";
+import { validate, plan, lanes, globIntersect, validateFile, type Dag } from "../lib/dag/index.js";
+import { pluginRoot } from "../lib/util.js";
 
 const base: Dag = {
   version: 1,
@@ -37,7 +39,8 @@ test("dag lanes reports intersection for src/** vs src/api/** on empty tree", ()
       { ...base.nodes[1]!, id: "n2", owns: ["src/api/**"], depends_on: [] },
     ],
   };
-  const v = lanes(dag, 1);
+  // lanes() is 0-indexed, matching plan().waves — wave 0 is the first wave.
+  const v = lanes(dag, 0);
   assert.ok(v.some((x) => x.code === "D2"));
   assert.equal(globIntersect("src/**", "src/api/**"), true);
 });
@@ -246,4 +249,149 @@ test("dag plan produces topological waves", () => {
   const p = plan(base);
   assert.deepEqual(p.waves[0], ["n1"]);
   assert.deepEqual(p.waves[1], ["n2"]);
+});
+
+// --- lanes() wave indexing (0-indexed, matching plan().waves) ---------
+
+test("lanes() is 0-indexed: every wave index plan() produces is valid on lanes() and reports no wave-code violation", () => {
+  const { waves } = plan(base);
+  for (const i of waves.keys()) {
+    const v = lanes(base, i);
+    assert.ok(!v.some((x) => x.code === "wave"), `wave ${i} unexpectedly reported a wave violation`);
+  }
+});
+
+test("lanes() reports a wave violation for a negative index", () => {
+  const v = lanes(base, -1);
+  assert.ok(v.some((x) => x.code === "wave"));
+});
+
+test("lanes() reports a wave violation for an index one past the last wave", () => {
+  const { waves } = plan(base);
+  const v = lanes(base, waves.length);
+  assert.ok(v.some((x) => x.code === "wave"));
+});
+
+// --- top-level constraints[] -------------------------------------------
+
+test("dag validate accepts a valid constraints array and does not flag it", () => {
+  const dag: Dag = { ...base, constraints: ["Node version must be >= 18.x for all backend nodes."] };
+  const v = validate(dag);
+  assert.ok(!v.some((x) => x.message.includes("constraints")));
+});
+
+test("dag validate rejects a constraints entry that is too short, naming its index", () => {
+  const dag: Dag = { ...base, constraints: ["too short"] };
+  const v = validate(dag);
+  assert.ok(v.some((x) => x.code === "schema" && x.message.includes("constraints[0]")));
+});
+
+test("dag validate rejects a non-string constraints entry, naming its index", () => {
+  const dag = { ...base, constraints: [123 as unknown as string] } as Dag;
+  const v = validate(dag);
+  assert.ok(v.some((x) => x.code === "schema" && x.message.includes("constraints[0]")));
+});
+
+test("dag validate with no constraints field validates exactly as before (backward compatible)", () => {
+  const v = validate(base);
+  assert.ok(!v.some((x) => x.message.includes("constraints")));
+});
+
+// --- per-node interfaces: referential validation ------------------------
+
+test("dag validate: interface-unproduced when a node consumes an identifier nothing produces", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, interfaces: { consumes: ["auth.verifyToken"] } },
+      { ...base.nodes[1]!, depends_on: ["n1"] },
+    ],
+  };
+  const v = validate(dag);
+  const hit = v.find((x) => x.code === "interface-unproduced");
+  assert.ok(hit);
+  assert.match(hit!.message, /n1/);
+  assert.match(hit!.message, /auth\.verifyToken/);
+});
+
+test("dag validate: interface-duplicate when two different nodes produce the same identifier", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, interfaces: { produces: ["auth.verifyToken"] } },
+      { ...base.nodes[1]!, depends_on: [], interfaces: { produces: ["auth.verifyToken"] } },
+    ],
+  };
+  const v = validate(dag);
+  const hit = v.find((x) => x.code === "interface-duplicate");
+  assert.ok(hit);
+  assert.match(hit!.message, /n1/);
+  assert.match(hit!.message, /n2/);
+  assert.match(hit!.message, /auth\.verifyToken/);
+});
+
+test("dag validate: interface-self when a node consumes an identifier it also produces itself", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, interfaces: { consumes: ["auth.verifyToken"], produces: ["auth.verifyToken"] } },
+      base.nodes[1]!,
+    ],
+  };
+  const v = validate(dag);
+  const hit = v.find((x) => x.code === "interface-self");
+  assert.ok(hit);
+  assert.match(hit!.message, /n1/);
+  assert.match(hit!.message, /auth\.verifyToken/);
+});
+
+test("dag validate: interface-order when a node consumes an identifier from a producer it does not (transitively) depend on", () => {
+  // n1 produces, n2 consumes but does NOT depend on n1 — sibling nodes, no edge between them.
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, depends_on: [], interfaces: { produces: ["auth.verifyToken"] } },
+      { ...base.nodes[1]!, depends_on: [], interfaces: { consumes: ["auth.verifyToken"] } },
+    ],
+  };
+  const v = validate(dag);
+  const hit = v.find((x) => x.code === "interface-order");
+  assert.ok(hit);
+  assert.match(hit!.message, /n2/);
+  assert.match(hit!.message, /auth\.verifyToken/);
+});
+
+test("dag validate: interface-order is transitive — a consumer two hops away from its producer is still fine", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, id: "n1", depends_on: [], interfaces: { produces: ["auth.verifyToken"] } },
+      { ...base.nodes[1]!, id: "n2", depends_on: ["n1"] },
+      { ...base.nodes[1]!, id: "n3", depends_on: ["n2"], interfaces: { consumes: ["auth.verifyToken"] } },
+    ],
+  };
+  const v = validate(dag);
+  assert.ok(!v.some((x) => x.code.startsWith("interface-")));
+});
+
+test("dag validate: happy path — a node consuming an identifier produced by a direct dependency validates clean", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, interfaces: { produces: ["auth.verifyToken"] } },
+      { ...base.nodes[1]!, depends_on: ["n1"], interfaces: { consumes: ["auth.verifyToken"] } },
+    ],
+  };
+  const v = validate(dag);
+  assert.ok(!v.some((x) => x.code.startsWith("interface-")));
+});
+
+test("dag validate with no interfaces field on any node validates exactly as before (backward compatible)", () => {
+  const v = validate(base);
+  assert.ok(!v.some((x) => x.code.startsWith("interface-")));
+});
+
+test("evals/fixtures/interfaces-dag.json (happy path: constraints + chained consumes/produces) validates clean", () => {
+  const v = validateFile(join(pluginRoot, "evals", "fixtures", "interfaces-dag.json"));
+  assert.deepEqual(v, []);
 });

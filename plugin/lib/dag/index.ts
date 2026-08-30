@@ -5,6 +5,11 @@ import { git, gitRoot, readJson } from "../util.js";
 export const ROLES = ["frontend", "backend", "data", "infra", "ai", "design"] as const;
 export type Role = (typeof ROLES)[number];
 
+export interface NodeInterfaces {
+  consumes?: string[];
+  produces?: string[];
+}
+
 export interface DagNode {
   id: string;
   title: string;
@@ -18,6 +23,7 @@ export interface DagNode {
   design?: "none" | "required";
   model?: string | null;
   notes?: string;
+  interfaces?: NodeInterfaces;
 }
 
 export interface Dag {
@@ -26,6 +32,7 @@ export interface Dag {
   base: string;
   profile?: "web" | "api" | "cli" | "ai-product";
   nodes: DagNode[];
+  constraints?: string[];
 }
 
 export interface Violation {
@@ -49,6 +56,21 @@ export function validate(dag: Dag): Violation[] {
   if (!dag.base) v.push({ code: "schema", message: "base is required" });
   if (!Array.isArray(dag.nodes) || dag.nodes.length < 1) v.push({ code: "schema", message: "nodes minItems 1" });
   if (dag.nodes?.length > 60) v.push({ code: "schema", message: "nodes maxItems 60" });
+
+  if (dag.constraints !== undefined) {
+    if (!Array.isArray(dag.constraints)) {
+      v.push({ code: "schema", message: "constraints must be an array" });
+    } else {
+      if (dag.constraints.length > 40) v.push({ code: "schema", message: "constraints maxItems 40" });
+      dag.constraints.forEach((c, i) => {
+        if (typeof c !== "string") {
+          v.push({ code: "schema", message: `constraints[${i}] must be a string` });
+        } else if (c.length < 10) {
+          v.push({ code: "schema", message: `constraints[${i}] too short (minLength 10)` });
+        }
+      });
+    }
+  }
 
   const ids = new Set<string>();
   for (const n of dag.nodes || []) {
@@ -74,6 +96,16 @@ export function validate(dag: Dag): Violation[] {
         v.push({ code: "D3", message: `${n.id} owns ${g} — a lane that owns everything is not a lane`, nodes: [n.id] });
       }
     }
+    for (const c of n.interfaces?.consumes || []) {
+      if (typeof c !== "string" || c.length < 1 || c.length > 40) {
+        v.push({ code: "schema", message: `interfaces.consumes identifier invalid on ${n.id}: ${c}` });
+      }
+    }
+    for (const p of n.interfaces?.produces || []) {
+      if (typeof p !== "string" || p.length < 1 || p.length > 40) {
+        v.push({ code: "schema", message: `interfaces.produces identifier invalid on ${n.id}: ${p}` });
+      }
+    }
   }
 
   const idSet = new Set((dag.nodes || []).map((n) => n.id));
@@ -84,6 +116,52 @@ export function validate(dag: Dag): Violation[] {
   }
   const cycle = findCycle(dag);
   if (cycle) v.push({ code: "D1", message: `cycle: ${cycle.join(" -> ")}`, nodes: cycle });
+
+  // Interface contracts: consumes/produces referential checks. Reuses the
+  // same depends_on adjacency findCycle walks, so an "order" violation means
+  // exactly what it says — the consuming node has no dependency path (direct
+  // or transitive) to a node that produces the identifier it needs.
+  const producers = new Map<string, string[]>();
+  for (const n of dag.nodes || []) {
+    for (const p of n.interfaces?.produces || []) {
+      if (typeof p !== "string" || !p.length) continue;
+      if (!producers.has(p)) producers.set(p, []);
+      producers.get(p)!.push(n.id);
+    }
+  }
+  for (const [ident, producerIds] of producers) {
+    if (producerIds.length > 1) {
+      v.push({
+        code: "interface-duplicate",
+        message: `identifier ${ident} is produced by multiple nodes: ${producerIds.join(", ")} — ambiguous ownership`,
+        nodes: producerIds,
+      });
+    }
+  }
+  for (const n of dag.nodes || []) {
+    for (const c of n.interfaces?.consumes || []) {
+      if (typeof c !== "string" || !c.length) continue;
+      const producerIds = producers.get(c) || [];
+      if (producerIds.length === 0) {
+        v.push({ code: "interface-unproduced", message: `${n.id} consumes ${c} but no node produces it`, nodes: [n.id] });
+        continue;
+      }
+      if (producerIds.includes(n.id)) {
+        v.push({ code: "interface-self", message: `${n.id} consumes ${c} which it also produces itself`, nodes: [n.id] });
+        continue;
+      }
+      const anc = transitiveDependencies(dag, n.id);
+      if (!producerIds.some((p) => anc.has(p))) {
+        v.push({
+          code: "interface-order",
+          message: `${n.id} consumes ${c} produced by ${producerIds.join(", ")} but does not (transitively) depend on ${
+            producerIds.length > 1 ? "any of them" : producerIds[0]
+          }`,
+          nodes: [n.id, ...producerIds],
+        });
+      }
+    }
+  }
 
   const waves = plan(dag).waves;
   waves.forEach((wave, i) => {
@@ -124,6 +202,25 @@ function findCycle(dag: Dag): string[] | null {
   };
   for (const id of nodes.keys()) dfs(id);
   return found;
+}
+
+// Every node reachable from `id` by walking depends_on edges outward —
+// i.e. the set of nodes `id` transitively depends on (its ancestors in
+// build order). Used by the interface-order check: a node may only consume
+// an identifier produced by something in this set. Guards against cycles
+// with a `seen` set the same way findCycle does, so a malformed graph can't
+// spin this into an infinite loop.
+function transitiveDependencies(dag: Dag, id: string): Set<string> {
+  const byId = new Map(dag.nodes.map((n) => [n.id, n]));
+  const seen = new Set<string>();
+  const stack = [...(byId.get(id)?.depends_on || [])];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const d of byId.get(cur)?.depends_on || []) stack.push(d);
+  }
+  return seen;
 }
 
 export function plan(dag: Dag): { waves: string[][] } {
@@ -414,7 +511,7 @@ export function laneIntersections(dag: Dag, wave: string[]): Violation[] {
 
 export function lanes(dag: Dag, waveIndex: number): Violation[] {
   const { waves } = plan(dag);
-  const wave = waves[waveIndex - 1];
+  const wave = waveIndex >= 0 ? waves[waveIndex] : undefined;
   if (!wave) return [{ code: "wave", message: `no wave ${waveIndex}` }];
   return laneIntersections(dag, wave);
 }

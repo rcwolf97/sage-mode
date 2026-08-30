@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { gitRoot, homeDir, projectSageDir, readSageHome, sageUserDir } from "../util.js";
+import { gitRoot, homeDir, projectSageDir, readSageHome, sageUserDir, sha256 } from "../util.js";
+import { redact } from "../redact/index.js";
+import { record as recordEgress } from "../egress/index.js";
 // architecture-v3.md §5 promised this and the code never delivered it:
 // "`--output-format json` returns `total_cost_usd` and a per-model
 // breakdown, so the ledger can record what every consult cost." The old
@@ -89,6 +91,75 @@ export function warnIfApiKeyInherited() {
         "sage consult: warning: unset it before running sage — e.g. `unset ANTHROPIC_API_KEY` — or\n" +
         "sage consult: warning: remove the export from your shell profile if it is set there.\n");
 }
+// Egress-ledger recording for Lane B. Scope, spelled out because half of
+// getting this right is being honest about the half that's skipped:
+//
+// A row is recorded only once this function has actually reached the point
+// of transmitting the (redacted) prompt to the `claude` subprocess — never
+// for assertTrusted()'s refusal or claudeAvailable()'s `claude --version`
+// probe, because in both of those paths nothing containing prompt content
+// has left the machine; recording a row there would fabricate an egress
+// event that never happened. That is the "explicitly records nothing, and
+// here is why" branch test/consult.test.ts pins.
+//
+// Two rows are appended per real dispatch, not one, because the ledger is
+// append-only and the model actually serving the call isn't known until
+// the CLI returns: a PRE-FLIGHT row goes on the chain immediately before
+// spawnSync, model "unknown", so an attempt that crashes or hangs mid-call
+// still leaves a record — "an attempted send that errored still left the
+// machine" applies even to a send that never got far enough to error
+// cleanly. A POST-FLIGHT row is appended right after spawnSync returns,
+// same payload hash/bytes/redaction count, model resolved from
+// extractModelReceipt() when the envelope verifies one — this is the
+// "update/append the outcome" step; it appends rather than mutates the
+// pre-flight row because mutating a hash-chained row is exactly what
+// egress/index.ts's verify() exists to catch. Recorded unconditionally on
+// this path, success, non-zero exit, or rate_limit alike, so the ledger
+// covers failures, not just successes.
+function recordConsultEgress(cwd, model, payload) {
+    try {
+        recordEgress(cwd, {
+            sink: "anthropic",
+            model,
+            lane: "B",
+            bytes: payload.bytes,
+            content_sha256: payload.content_sha256,
+            redactions: payload.redactions,
+        });
+    }
+    catch (err) {
+        process.stderr.write(`sage consult: warning: egress ledger append failed: ${String(err)}\n`);
+    }
+}
+// Lane C seam: this module never dispatches to Gemini itself (the review
+// skill drives that dispatch via Cursor-native `model:` frontmatter, not
+// spawnSync — see lib/egress's grants() header for why Lane A/C's
+// Cursor-native routing is otherwise unobservable from this repo's code).
+// What this repo's OWN code can do is the one thing that's actually its
+// job either way: redact the payload before the skill hands it to the
+// reviewer, and put a receipt on the chain that it did. Single row — no
+// pre/post split like recordConsultEgress, because there is no subprocess
+// here for this function to have crashed partway through; the skill that
+// calls this owns the actual dispatch and its outcome.
+export function recordLaneCDispatch(root, opts) {
+    const redacted = redact(opts.payload);
+    try {
+        recordEgress(root, {
+            sink: "google",
+            model: opts.model,
+            lane: "C",
+            sprint: opts.sprint,
+            node: opts.node,
+            bytes: Buffer.byteLength(redacted.text, "utf8"),
+            content_sha256: sha256(redacted.text),
+            redactions: redacted.count,
+        });
+    }
+    catch (err) {
+        process.stderr.write(`sage consult: warning: egress ledger append failed (lane C): ${String(err)}\n`);
+    }
+    return redacted.text;
+}
 export function consult(opts) {
     try {
         assertTrusted(opts.cwd);
@@ -111,8 +182,14 @@ export function consult(opts) {
         : opts.role === "qa-analyst"
             ? join(home, "agents", "qa-analyst.md")
             : join(home, "agents", "architect.md");
-    const prompt = opts.prompt || (opts.brief && existsSync(opts.brief) ? readFileSync(opts.brief, "utf8") : "");
-    const args = ["-p", prompt, "--allowedTools", "Read,Grep,Glob", "--output-format", "json"];
+    const rawPrompt = opts.prompt || (opts.brief && existsSync(opts.brief) ? readFileSync(opts.brief, "utf8") : "");
+    const redacted = redact(rawPrompt);
+    const egressPayload = {
+        bytes: Buffer.byteLength(redacted.text, "utf8"),
+        content_sha256: sha256(redacted.text),
+        redactions: redacted.count,
+    };
+    const args = ["-p", redacted.text, "--allowedTools", "Read,Grep,Glob", "--output-format", "json"];
     if (existsSync(roleFile))
         args.push("--append-system-prompt-file", roleFile);
     if (opts.schema && existsSync(opts.schema))
@@ -122,8 +199,12 @@ export function consult(opts) {
     if (resume)
         args.push("--resume", resume);
     warnIfApiKeyInherited();
+    const egressRoot = opts.cwd || process.cwd();
+    recordConsultEgress(egressRoot, "unknown", egressPayload); // pre-flight — see the comment above consult()
     const r = spawnSync("claude", args, { encoding: "utf8", cwd: opts.cwd || process.cwd(), maxBuffer: 20 * 1024 * 1024 });
     const out = r.stdout || "";
+    const model_receipt = extractModelReceipt(out);
+    recordConsultEgress(egressRoot, model_receipt.verified ? model_receipt.models.join(",") : "unknown", egressPayload); // post-flight outcome
     if ((r.stderr || "").toLowerCase().includes("rate_limit") || /rate.?limit/i.test(out)) {
         return {
             ok: false,
@@ -154,7 +235,7 @@ export function consult(opts) {
         text: out,
         session_id,
         total_cost_usd,
-        model_receipt: extractModelReceipt(out),
+        model_receipt,
         parsed,
     };
 }
