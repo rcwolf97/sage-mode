@@ -26,11 +26,26 @@ function withHome<T>(dir: string, fn: () => T): T {
   }
 }
 
-test("consult degrades with exit 3 when claude is absent or untrusted handling still returns a result", () => {
+test("consult always returns a structured result and never throws, whatever the host's claude does", () => {
   const cwd = tmp();
+  // Deliberately does NOT enumerate the exit codes a real `claude` may return.
+  // An earlier version asserted `exit` was one of {0, 1, 3} and failed on a
+  // machine whose `claude` is a restricted wrapper that exits 2 on any
+  // invocation carrying sage's full argument set. That was the test being
+  // wrong, not the code: consult()'s contract is that it hands back a
+  // well-formed ConsultResult for the caller to branch on, never a throw and
+  // never a partially-populated object — the exit code itself belongs to
+  // whatever binary is installed and is not ours to pin.
   const r = consult({ role: "product", prompt: "hello", cwd });
-  assert.ok(r.exit === 3 || r.ok || r.exit === 0 || r.exit === 1);
+  assert.equal(typeof r.ok, "boolean");
+  assert.equal(typeof r.exit, "number");
+  assert.equal(typeof r.text, "string");
+  assert.ok(Number.isInteger(r.exit), "exit must be an integer");
+  // The one exit code we DO own: the degraded path is sage's own signal, not
+  // the child's, so it must always be 3.
   if (r.degraded) assert.equal(r.exit, 3);
+  // ok and a non-zero exit must never disagree.
+  if (r.ok) assert.equal(r.exit, 0);
 });
 
 // --- egress ledger wiring ---
