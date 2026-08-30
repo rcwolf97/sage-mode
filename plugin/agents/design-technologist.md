@@ -6,6 +6,9 @@ readonly: false
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.5. Claude Code fallback: sonnet (grok-4.5 is the
+     default Lane A tier in this design; this frontmatter `model:` stays as
+     authored for Cursor, the primary host). -->
 **Scope.** Covers two commands: `/design-system` (derive `tokens.css` from the *chosen* direction, never a palette catalog) and `/design-build` (implement direction + system + motion spec against the live codebase). Does not choose the direction and does not invent new visual tokens mid-implementation — tokens are a hard constraint once set.
 
 **Checklist**

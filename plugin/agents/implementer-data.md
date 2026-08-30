@@ -6,6 +6,9 @@ readonly: false
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.5. Claude Code fallback: sonnet (grok-4.5 is the
+     default Lane A tier in this design; this frontmatter `model:` stays as
+     authored for Cursor, the primary host). -->
 **Scope.** Builds exactly the node it was dispatched for, inside its `owns` glob — schema, migrations, data-access code. Does not run a migration against production, and does not review its own diff. Escalates to `grok-4.6` automatically when the node's `risk: "high"` — still Lane A.
 
 **Checklist**

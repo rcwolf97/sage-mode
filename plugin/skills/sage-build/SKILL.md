@@ -15,6 +15,8 @@ so name the flag you depend on rather than trust the default.
 
 **Refuse if the plan's spec is not `readiness: implementation-ready`.** Point
 the user at `/sage-dag` rather than building against an unvalidated graph.
+**Conduct:** assumes `rules/sage-conduct.mdc` is loaded; on Claude Code (no
+always-applied rules), get it into the session first via `CLAUDE.md`.
 
 **Reads:** `dag.json`, `ledger.md`.
 **Writes:** commits in worktrees, `ledger.md`, board files, node reports,
@@ -38,12 +40,14 @@ history), it must return the correct next action: `dispatch`, `join`, `rule`,
 
 `sage dag plan` returns the topological waves. For each wave, in order:
 
-**a. Check lanes, abort on any intersection.** `sage dag lanes --wave N`. An
-intersection here is a **planning bug**, not a runtime condition — it means a
-graph that already passed `/sage-dag`'s validation somehow reached build with
-overlapping lanes (a stale `dag.json`, a manual edit, a re-plan that skipped
-re-validation). Do not paper over it by serializing the two nodes yourself.
-Stop the wave and send it back to `/sage-dag`.
+**a. Check lanes, abort on any intersection.** `sage dag lanes --wave N` —
+**waves are 0-indexed** (the array `sage dag plan` returns), so the first
+wave is `--wave 0`; the wrong index checks the wrong wave and triggers a
+spurious full-build abort. An intersection is a **planning bug**, not a
+runtime condition — a graph that already passed `/sage-dag` validation
+somehow reached build with overlapping lanes (a stale `dag.json`, a manual
+edit, a skipped re-validation). Don't serialize the two nodes yourself; stop
+the wave and send it back to `/sage-dag`.
 
 **b. Set up worktree, lane, and brief — per node.** For each node in the
 wave: `sage dag worktree <id>` to allocate `.worktrees/s<NN>-<id>`; write
@@ -55,17 +59,15 @@ filling in the node's id, title, role, `owns`, `reads`, acceptance criteria,
 **c. Dispatch all nodes of the wave in a single message.** One Task call per
 node, in the same assistant turn, so Cursor actually parallelizes them —
 waiting and dispatching one at a time defeats the point of a wave. Pass each
-Implementer the brief's **path**, never its contents; a skill must not paste
-file contents into a subagent dispatch prompt.
+Implementer the brief's **path**, never its contents. **Set `is_background:
+false` explicitly on every dispatch** — all of them must finish before the
+wave can join; don't omit the flag and rely on whatever the current default
+happens to be.
 
-**d. Set `is_background: false` explicitly on every dispatch.** All of them
-must finish before the wave can join. Do not omit the flag and rely on
-whatever the current default happens to be.
-
-**e. Partial failure is not fatal.** If one node in the wave blocks, errors, or
-times out, log it and continue with the nodes that completed. Report the
-partial state at the join — do not stall the whole wave waiting on one stuck
-node, and do not silently drop it either.
+**d. Partial failure is not fatal.** If one node in the wave blocks, errors,
+or times out, log it and continue with the nodes that completed. Report the
+partial state at the join — do not stall the whole wave on one stuck node,
+and do not silently drop it either.
 
 ### 3. The Implementer contract
 
@@ -75,7 +77,11 @@ Every Implementer subagent (`agents/implementer-*.md`), per node:
 2. Write a **failing test first**.
 3. Implement minimally — enough to pass the test and satisfy the acceptance
    criteria, nothing beyond the node's `owns`.
-4. Run `sage evidence run --label <id> -- <verify>`.
+4. Run `sage evidence run --label <id> -- <verify>`. **Refuses to start if
+   `.sage/` or `.worktrees/` aren't gitignored** — its own writes would land
+   in the fingerprint the freshness check reads later and grade it STALE
+   forever. Fix `.gitignore`, or pass `--allow-unignored` knowing this run's
+   evidence can never grade FRESH.
 5. Commit, one commit per acceptance criterion.
 6. Write `reports/<id>.md`.
 
@@ -200,6 +206,13 @@ exactly the bug step 2a exists to catch.
 If a node has `design: required` and `docs/design/brief.md` does not exist,
 block that node and tell the user to run `/design-intake` first rather than
 letting the Implementer improvise a design.
+
+## Non-interactive
+
+The four escalation categories and a circuit-breaker stop still halt and
+report, never a silent ruling; everything else rules per
+`rules/sage-conduct.mdc` and continues, logged. Terminal: `Build complete: N
+nodes done` or `Build blocked: <blocker path>`.
 
 ## Common Rationalizations
 

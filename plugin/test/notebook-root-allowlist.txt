@@ -17,16 +17,3 @@
 #
 # Format: one offender per line, "<file relative to plugin root>: <literal>".
 # Blank lines and lines starting with # are ignored.
-
-skills/design-critique/SKILL.md: docs/sprints/NN/evidence/
-skills/design-intake/SKILL.md: docs/roadmap.md
-skills/sage-plan/SKILL.md: docs/sprints/NN-<slug>/spec.md
-skills/sage-plan/SKILL.md: docs/roadmap.md
-skills/sage-plan/SKILL.md: docs/sprints/NN-<slug>/spec.{md,html}
-skills/sage-retro/SKILL.md: docs/roadmap.md
-skills/sage-review/SKILL.md: docs/sprints/NN/review.{md,html}
-skills/sage-review/SKILL.md: docs/sprints/NN/review.md
-skills/sage-shape/SKILL.md: docs/roadmap.md
-skills/sage-shape/SKILL.md: docs/roadmap.html
-skills/sage-status/SKILL.md: docs/roadmap.md
-skills/sage-verify/SKILL.md: docs/sprints/NN/evidence/

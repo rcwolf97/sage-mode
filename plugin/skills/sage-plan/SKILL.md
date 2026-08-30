@@ -1,6 +1,6 @@
 ---
 name: sage-plan
-description: Sprint planning. Product + Architect. Writes docs/sprints/NN-<slug>/spec.md.
+description: Sprint planning. Product + Architect. Writes <notebook>/sprints/NN-<slug>/spec.md.
 disable-model-invocation: true
 ---
 
@@ -13,13 +13,15 @@ runs on Lane B as in `sage-shape` (`sage consult --role product --session --brie
 for feasibility and risk only — turning the approved spec into a task graph is
 `/sage-dag`'s job, not this one.
 
-**Reads:** `docs/roadmap.md`, open findings from the last `/sage-review`,
+**Reads:** `<notebook>/roadmap.md`, open findings from the last `/sage-review`,
 `sage recall`.
-**Writes:** `docs/sprints/NN-<slug>/spec.{md,html}`, the roadmap status column.
+**Writes:** `<notebook>/sprints/NN-<slug>/spec.{md,html}`, the roadmap status
+column. (`<notebook>` is the configured notebook root, `docs/` by default —
+see `rules/sage-conduct.mdc`.)
 
 ## Procedure
 
-1. **Refuse if no approved roadmap exists.** `docs/roadmap.md` must exist with
+1. **Refuse if no approved roadmap exists.** `<notebook>/roadmap.md` must exist with
    `status: approved`. Point the user at `/sage-shape` instead of guessing at
    scope from nothing.
 2. **Ground.** Read the roadmap, and `sage recall "<candidate sprint framing>"
@@ -47,7 +49,7 @@ for feasibility and risk only — turning the approved spec into a task graph is
    the specific command, response, or screen state that proves it. See
    `references/spec-quality.md` if a done-condition keeps drifting back to
    "works correctly."
-8. **Write the spec** to `docs/sprints/NN-<slug>/spec.md` from
+8. **Write the spec** to `<notebook>/sprints/NN-<slug>/spec.md` from
    `templates/spec.md`, with `readiness: requirements-only`. It MUST contain:
    - the goal, in one sentence;
    - the item list, each with an observable done-condition and an owner;
@@ -56,7 +58,7 @@ for feasibility and risk only — turning the approved spec into a task graph is
    - the verification profile: `web` / `api` / `cli` / `ai-product`.
 9. **Update the roadmap** status column for each item taken into the sprint,
    linking to the spec. Amend, do not delete — mark superseded rows.
-10. **Render.** `sage notebook render docs/sprints/NN-<slug>/spec.md`, then
+10. **Render.** `sage notebook render <notebook>/sprints/NN-<slug>/spec.md`, then
     `sage notebook index`.
 11. **Gate.** Decision brief on the assembled spec. Stop.
 
@@ -76,6 +78,23 @@ clean. `/sage-build` MUST refuse a plan whose spec is not
 — doing so would let a sprint reach `/sage-build` with a spec nobody checked
 for a buildable decomposition. If a spec needs revision after `/sage-dag` has
 already run, whoever edits it MUST reset `readiness` to `requirements-only`.
+
+## Conduct
+
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
+on a host without an always-applied rules mechanism (Claude Code), the
+operator must get its content into the session some other way (e.g. folded
+into the project's `CLAUDE.md`) before running this skill.
+
+## Non-interactive
+
+Steps 4 and 11 have no one to answer them. Take every proposed candidate
+from step 3 rather than asking which makes the cut, order them by roadmap
+row order and dependency, and write the spec unapproved — `readiness:
+requirements-only` still gates `/sage-dag` behind a human eventually
+approving it, so nothing downstream runs on an un-reviewed guess. Terminal:
+`Plan complete: spec drafted, unapproved` or `Plan blocked: <reason>` (e.g.
+no approved roadmap).
 
 ## Common Rationalizations
 

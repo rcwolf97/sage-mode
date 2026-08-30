@@ -13,8 +13,9 @@ proposes tuning to sage-mode's own skills — as a diff the user approves, not
 a silent edit.
 
 **Reads:** the sprint's ledger, board files, review residuals, verify
-findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
-`docs/roadmap.md`, a proposed skill diff.
+findings, `.sage/specialist-stats.json`. **Writes:** `<notebook>/learnings/`,
+`<notebook>/roadmap.md`, a proposed skill diff. (`<notebook>` is the
+configured notebook root, `docs/` by default — see `rules/sage-conduct.mdc`.)
 
 ## Procedure
 
@@ -114,7 +115,7 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
    learning, or unsure whether a change to what changed this sprint is
    enough to supersede vs. just reconfirm) for the full field documentation.
 
-5. **Update the roadmap.** `docs/roadmap.md` status column: which items
+5. **Update the roadmap.** `<notebook>/roadmap.md` status column: which items
    shipped, which slipped (and to where), which changed scope. Amend, don't
    delete — mark superseded rows rather than removing history.
 
@@ -149,6 +150,22 @@ findings, `.sage/specialist-stats.json`. **Writes:** `docs/learnings/`,
    correct: a skill file used by every future sprint is a wide blast radius
    for an unreviewed edit. See `references/tuning-diff.md` (trigger:
    preparing the tuning diff at the end of a retro) for the expected shape.
+
+## Conduct
+
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
+on a host without an always-applied rules mechanism (Claude Code), the
+operator must get its content into the session some other way (e.g. folded
+into the project's `CLAUDE.md`) before running this skill.
+
+## Non-interactive
+
+Step 8's tuning diff has no one to approve it. Every other step (learnings,
+staleness re-check, roadmap, cost) proceeds exactly as usual — none of them
+gate on a live question. Write the tuning diff to disk unapplied, same as
+always, and stop there rather than waiting on an approval that won't come.
+Terminal: `Retro complete: tuning diff written, unapplied` or `Retro skipped:
+<reason>`.
 
 ## Common Rationalizations
 

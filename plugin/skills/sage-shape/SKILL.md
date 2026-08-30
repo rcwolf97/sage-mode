@@ -1,6 +1,6 @@
 ---
 name: sage-shape
-description: Project intake. One question at a time. Writes docs/roadmap.md and renders HTML.
+description: Project intake. One question at a time. Writes <notebook>/roadmap.md and renders HTML.
 disable-model-invocation: true
 ---
 
@@ -24,9 +24,9 @@ Ground before interrogating, because the notebook may already contain the answer
 
 ### 1. Ground
 
-Before asking anything, read `docs/preferences/`, the existing `docs/roadmap.md` if one exists, and run `sage recall "<initial framing>" --kind learning`. Never start cold when the notebook already has context. A prior retro may have already recorded that this exact kind of feature under-delivered last time, that this user's stated preference is "narrowest possible wedge, always," or that a similar demand claim turned out to be interest rather than demand once it shipped. Surfacing that context early changes which follow-ups you need and which you can skip — you do not need to re-litigate a preference the notebook already states plainly, only confirm it still holds.
+Before asking anything, read `docs/preferences/`, the existing `<notebook>/roadmap.md` if one exists, and run `sage recall "<initial framing>" --kind learning`. (`<notebook>` is the configured notebook root, `docs/` by default — see `rules/sage-conduct.mdc`.) Never start cold when the notebook already has context. A prior retro may have already recorded that this exact kind of feature under-delivered last time, that this user's stated preference is "narrowest possible wedge, always," or that a similar demand claim turned out to be interest rather than demand once it shipped. Surfacing that context early changes which follow-ups you need and which you can skip — you do not need to re-litigate a preference the notebook already states plainly, only confirm it still holds.
 
-If `docs/roadmap.md` already exists, this run is a re-run, not a fresh intake — see the amendment rules at the end of step 6. Read the existing roadmap in full, including its premise-challenge and out-of-scope sections, before asking the user anything. Re-asking a question the existing roadmap already answered wastes the user's patience and signals you skipped the ground step. Where the framing has clearly moved on (a pivot, a new user segment, a scrapped wedge), say so and confirm which parts of the old roadmap still hold before treating anything as settled.
+If `<notebook>/roadmap.md` already exists, this run is a re-run, not a fresh intake — see the amendment rules at the end of step 6. Read the existing roadmap in full, including its premise-challenge and out-of-scope sections, before asking the user anything. Re-asking a question the existing roadmap already answered wastes the user's patience and signals you skipped the ground step. Where the framing has clearly moved on (a pivot, a new user segment, a scrapped wedge), say so and confirm which parts of the old roadmap still hold before treating anything as settled.
 
 Let the ground step actually shape the first question rather than sitting unused once read. If `sage recall` surfaces a learning like "the last two intakes for this team over-scoped the wedge," don't file that away silently — open with something informed by it: *"Last time around, the wedge ended up covering more than planned. Let's start narrow on purpose this time — who's the one person hitting this problem right now?"* A ground step that gets read but doesn't change the first question asked was not worth running.
 
@@ -310,7 +310,7 @@ If any item fails, go back to the relevant step rather than writing around the g
 
 ### 6. Write the roadmap
 
-Write `docs/roadmap.md` from `templates/roadmap.md`, or update it in place if a roadmap already exists (see the amendment rules below). A roadmap is not a spec. A spec says exactly what to build and how; a roadmap is a **map** — what the feature set is, what order it comes in, why that order, and what state each item is in. Individual sprints, written later by `/sage-plan`, are what turn one roadmap row into an actual spec.
+Write `<notebook>/roadmap.md` from `templates/roadmap.md`, or update it in place if a roadmap already exists (see the amendment rules below). A roadmap is not a spec. A spec says exactly what to build and how; a roadmap is a **map** — what the feature set is, what order it comes in, why that order, and what state each item is in. Individual sprints, written later by `/sage-plan`, are what turn one roadmap row into an actual spec.
 
 Every row in the feature map table needs, at minimum:
 
@@ -339,7 +339,7 @@ The "before" version could describe almost any feature in almost any product; it
 
 ### 7. Render
 
-Run `sage notebook render docs/roadmap.md`, then `sage notebook index`. A roadmap that only exists as unrendered markdown is not done — both the gate in step 8 and the completion condition at the end of this file require the rendered HTML to actually exist and render without error. After any amendment on a re-run, re-render; a stale `docs/roadmap.html` that no longer matches the markdown is worse than no HTML at all, because it actively misleads a reader who trusts it.
+Run `sage notebook render <notebook>/roadmap.md`, then `sage notebook index`. A roadmap that only exists as unrendered markdown is not done — both the gate in step 8 and the completion condition at the end of this file require the rendered HTML to actually exist and render without error. After any amendment on a re-run, re-render; a stale `<notebook>/roadmap.html` that no longer matches the markdown is worse than no HTML at all, because it actively misleads a reader who trusts it.
 
 ### 8. Gate
 
@@ -350,6 +350,24 @@ A roadmap approval is rarely a clean binary in practice. If the user approves mo
 ## What this skill does not do
 
 `/sage-shape` produces a roadmap, not a technical plan. It does not assess feasibility, estimate effort, or design an architecture — that's `/sage-plan`'s Architect consult, run per sprint once a roadmap row is picked up. It does not write acceptance criteria at implementation granularity — that's the sprint spec, also `/sage-plan`. It does not decide engineering trade-offs like which database or framework to use; the premise challenge in step 4 argues about whether and what to build, not how to build it. If the interrogation surfaces a clearly technical question — "can our current infrastructure even support real-time badges" — note it as an open question for the Architect consult in the eventual sprint, rather than trying to answer it here or blocking the roadmap on it. A roadmap row can carry unresolved technical risk explicitly; it cannot carry an unresolved "why" or an unresolved observable, which are this skill's job to nail down.
+
+## Conduct
+
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
+on a host without an always-applied rules mechanism (Claude Code), the
+operator must get its content into the session some other way (e.g. folded
+into the project's `CLAUDE.md`) before running this skill.
+
+## Non-interactive
+
+This skill's entire procedure depends on a live person answering the
+interrogation in step 2 — there is no non-interactive substitute for a
+founder's actual answer, and inventing one to keep going would violate the
+usable-answer bar that step sets. In non-interactive mode, run the ground
+step (1) only, report what context already exists, and stop before asking
+anything — never fabricate an interrogation to produce a roadmap nobody
+actually answered. Terminal: `Shape skipped: no human available for the
+interrogation`.
 
 ## Common Rationalizations
 
@@ -389,7 +407,7 @@ A roadmap approval is rarely a clean binary in practice. If the user approves mo
 - A roadmap feature row with an empty "why" or an empty "observable success" cell
 - A row marked `in progress` with no linked spec
 - Roadmap history overwritten on a re-run instead of amended, with superseded rows marked
-- `docs/roadmap.html` never rendered, or rendered once and not re-rendered after a later amendment
+- `<notebook>/roadmap.html` never rendered, or rendered once and not re-rendered after a later amendment
 - Proceeding to a later skill without an explicit, stated user approval of the decision brief
 - A user's answer accepted at face value after visibly hedging, deflecting, or answering a different question than the one asked
 - A founder's framing of who has the problem accepted without checking it against an actual user quote when one exists
@@ -406,4 +424,4 @@ A third file, `references/worked-transcript.md`, has a different kind of trigger
 
 ## Done when
 
-`docs/roadmap.html` renders without error; every row in the feature map has a non-empty, evidenced "why" and a genuinely observable — not felt, not assumed — success signal; the premise challenge's strongest objection is recorded in full in the roadmap's premise-challenge section, whether or not it changed the outcome; at least two materially different shapes were generated with their trade-off named, and the chosen shape is identifiable in the roadmap; and the user has given explicit, stated approval of the decision brief in step 8 — not silence, not a topic change, an actual yes, with every feature-map row explicitly addressed.
+`<notebook>/roadmap.html` renders without error; every row in the feature map has a non-empty, evidenced "why" and a genuinely observable — not felt, not assumed — success signal; the premise challenge's strongest objection is recorded in full in the roadmap's premise-challenge section, whether or not it changed the outcome; at least two materially different shapes were generated with their trade-off named, and the chosen shape is identifiable in the roadmap; and the user has given explicit, stated approval of the decision brief in step 8 — not silence, not a topic change, an actual yes, with every feature-map row explicitly addressed.

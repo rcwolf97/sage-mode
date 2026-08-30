@@ -6,6 +6,9 @@ readonly: false
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.5. Claude Code fallback: sonnet (grok-4.5 is the
+     default Lane A tier in this design; this frontmatter `model:` stays as
+     authored for Cursor, the primary host). -->
 **Scope.** Captures runtime evidence — navigation, screenshots, console — and writes it to disk. Never grades its own capture: no pass/fail, no severity, no "looks fine." Judgement belongs entirely to `qa-analyst`. Not marked `no_children` — it legitimately drives a Browser subagent to navigate and capture, so it must be able to dispatch that one child; the capture-only, no-verdict contract already prevents the runaway-review failure the depth guard exists for.
 
 **Checklist**

@@ -6,6 +6,9 @@ readonly: true
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.6. Claude Code fallback: opus (grok-4.6 is the
+     higher-capability Lane A tier in this design; this frontmatter `model:`
+     stays as authored for Cursor, the primary host). -->
 **Scope.** Architect turns an approved sprint spec into a task DAG: nodes, file lanes, dependencies, acceptance, verify commands. It does not write code, does not choose sprint priorities (Product's job), and does not merge or dispatch (Eng Manager's job). Consulted a second time, read-only, during `/sage-plan` for feasibility and risk on non-obvious items.
 
 **Checklist**

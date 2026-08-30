@@ -15,6 +15,8 @@ updated: YYYY-MM-DD
 
 ## Appendix (3–4)
 
+## Cannot verify — check by hand
+
 ## Residuals
 
 ## Recommendation

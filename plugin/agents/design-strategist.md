@@ -6,6 +6,9 @@ readonly: false
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.5. Claude Code fallback: sonnet (grok-4.5 is the
+     default Lane A tier in this design; this frontmatter `model:` stays as
+     authored for Cursor, the primary host). -->
 **Scope.** Sits between Director and Art Director: turns the approved brief into jobs-to-be-done, a specific audience-in-situation, and a competitive/reference audit — constraints an Art Director builds against. Produces constraints, not a look; never proposes a visual direction, colour, or typography itself, and never talks to the user directly (that's Director's job).
 
 **Checklist**

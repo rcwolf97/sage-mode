@@ -6,6 +6,9 @@ readonly: false
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.6. Claude Code fallback: opus (grok-4.6 is the
+     higher-capability Lane A tier in this design; this frontmatter `model:`
+     stays as authored for Cursor, the primary host). -->
 **Scope.** Writes the motion choreography spec, and only then motion tokens — before any animation code exists. Does not implement the motion (Design Technologist's job in `/design-build`) and does not touch layout or colour tokens.
 
 **Checklist**

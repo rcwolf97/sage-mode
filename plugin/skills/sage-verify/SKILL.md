@@ -18,8 +18,15 @@ on the good model is strictly better than putting both halves on either lane
 alone.
 
 **Reads:** the branch, the sprint spec's verification profile,
-`profiles/<profile>.json`. **Writes:** `docs/sprints/NN/evidence/`.
+`profiles/<profile>.json`. **Writes:** `<notebook>/sprints/NN/evidence/`
+(`<notebook>` is the configured notebook root, `docs/` by default — see
+`rules/sage-conduct.mdc`).
 **Runs:** `qa-driver` (Lane A), `qa-analyst` (Lane B).
+
+**Conduct.** Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it
+automatically; on a host without an always-applied rules mechanism (Claude
+Code), the operator must get its content into the session some other way
+(e.g. folded into the project's `CLAUDE.md`) before running this skill.
 
 ## Procedure
 
@@ -37,7 +44,12 @@ alone.
    `golden`, `sandbox`, `ttfs`, `evals`, `prompts`) runs through `sage
    evidence run --label <id> -- <command>` — the evidence wrapper — which
    tees output to a capped log and writes a wtree-fingerprinted record; that
-   record *is* the artifact. **Resolve a `${verify.X}` placeholder by reading
+   record *is* the artifact. **`sage evidence run` refuses to start if
+   `.sage/` or `.worktrees/` aren't gitignored** — its own writes would land
+   inside the fingerprint the freshness check reads later and grade every
+   subsequent check STALE forever. Fix `.gitignore`, or pass
+   `--allow-unignored` knowing this run's evidence can never grade FRESH.
+   **Resolve a `${verify.X}` placeholder by reading
    the matching key from `.sage/config.json`'s `verify` object** (written by
    `sage-setup`; `tests`/`typecheck`/`build` always get a default, the
    profile-specific keys only if a prior setup or the user supplied one —
@@ -89,6 +101,14 @@ alone.
    artifact exists, the analyst's verdict, and any degradation. If any
    required check has no artifact, say the run is not verified — don't round
    a partial pass up to a clean one.
+
+## Non-interactive
+
+Nothing in this skill's own procedure blocks on a question — degradation
+(step 5) and severity gating (step 6) already resolve without a human; only
+the final ship/no-ship call lives outside this skill. Terminal: `Verify
+complete: all required checks have artifacts` / `Verify blocked: <check> has
+no artifact` / `Verify skipped: <reason>` (e.g. profile unresolved).
 
 ## Common Rationalizations
 
