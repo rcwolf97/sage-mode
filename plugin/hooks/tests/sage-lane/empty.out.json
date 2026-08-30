@@ -1,1 +1,1 @@
-{"permission": "deny", "agent_message": "[lane] Could not parse the tool payload. Blocked (fail closed)."}
+{"permission": "deny", "agent_message": "[lane] Could not parse the tool payload. Blocked (fail closed).", "user_message": "[lane] Could not parse the tool payload. Blocked (fail closed)."}

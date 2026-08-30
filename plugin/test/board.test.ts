@@ -3,9 +3,14 @@ import test from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLedger, next, type Ledger } from "../lib/board/index.js";
-import { renderLedger } from "../lib/board/index.js";
+import { parseLedger, next, saveLedger, type Ledger } from "../lib/board/index.js";
+import { renderLedger, ledgerPath } from "../lib/board/index.js";
 import { computeWtf, deriveWtfSignals, evaluateCircuitBreaker, type WtfSignals } from "../lib/board/index.js";
+import {
+  loadLedgerOrThrow,
+  evaluateCircuitBreakerForSprint,
+  LedgerNotFoundError,
+} from "../lib/board/index.js";
 
 function L(over: Partial<Ledger> & { nodes: Ledger["nodes"] }): Ledger {
   return {
@@ -230,6 +235,64 @@ test("deriveWtfSignals: a sprint with no dag.json and no matching git branches d
   assert.equal(result.score, 0);
   assert.equal(result.stopAndAsk, false);
   assert.equal(result.hardCapReached, false);
+});
+
+// -----------------------------------------------------------------------
+// Bug (1): silent failure on the `sage board wtf`/`sage board ledger` path
+// -----------------------------------------------------------------------
+//
+// The CLI's `if (!l) return 1;` for a missing ledger produced exit 1 with
+// nothing on stdout or stderr — no number, no error. loadLedgerOrThrow /
+// evaluateCircuitBreakerForSprint replace that dead end with a typed,
+// catchable failure carrying a machine-readable reason.
+
+test("loadLedgerOrThrow throws LedgerNotFoundError with a machine-readable reason when the ledger is missing", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-ledger-"));
+  assert.throws(
+    () => loadLedgerOrThrow("01", root),
+    (err: unknown) => {
+      assert.ok(err instanceof LedgerNotFoundError, "must throw LedgerNotFoundError");
+      assert.equal(err.code, "no-ledger");
+      assert.equal(err.sprint, "01");
+      assert.equal(err.expectedPath, ledgerPath("01", root));
+      assert.match(err.message, /no ledger for sprint 01/);
+      assert.match(err.message, /run \/sage-build first/);
+      return true;
+    },
+  );
+});
+
+test("loadLedgerOrThrow returns the parsed ledger when one exists, same as loadLedger", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-ledger-"));
+  const l = L({ sprint: "02", nodes: { n1: pending } });
+  saveLedger(l, root);
+  const loaded = loadLedgerOrThrow("02", root);
+  assert.equal(loaded.sprint, "02");
+});
+
+test("evaluateCircuitBreakerForSprint throws LedgerNotFoundError (not a silent zero score) when the ledger is missing", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-wtf-sprint-"));
+  assert.throws(() => evaluateCircuitBreakerForSprint("03", root), LedgerNotFoundError);
+});
+
+test("evaluateCircuitBreakerForSprint scores a real ledger the same way evaluateCircuitBreaker(loadLedger(...)) would", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-wtf-sprint-"));
+  const l: Ledger = {
+    sprint: "04",
+    plan: "docs/sprints/does-not-exist/dag.json",
+    base: "main",
+    branch: "sprint/04",
+    started: "2026-01-01T00:00:00Z",
+    waves: [["n1"]],
+    nodes: { n1: pending },
+    rulings: [],
+    cost: { laneB: 0, laneCtokens: 0 },
+    wtf: 0,
+  };
+  saveLedger(l, root);
+  const result = evaluateCircuitBreakerForSprint("04", root);
+  assert.equal(result.score, 0);
+  assert.equal(result.stopAndAsk, false);
 });
 
 test("deriveWtfSignals: allRemainingFindingsLow is false, not true, when findings.jsonl is simply absent", () => {

@@ -154,6 +154,57 @@ export function loadLedger(sprint: string, root?: string): Ledger | null {
   return parseLedger(readFileSync(p, "utf8"));
 }
 
+// ---------------------------------------------------------------------------
+// Explicit-failure ledger loading
+// ---------------------------------------------------------------------------
+//
+// loadLedger() above returns `null` on a missing ledger, which is the right
+// shape for callers like next() that have a legitimate "no ledger yet" branch
+// to fall into. But `sage board wtf`/`sage board ledger` had no such branch —
+// the CLI's `if (!l) return 1;` turned a missing ledger into exit 1 with
+// nothing on stdout or stderr. Worse than an ordinary silent failure:
+// skills/sage-build/SKILL.md names `sage board wtf` as the *only* legitimate
+// source of the WTF-likelihood number, specifically to close off an agent
+// hand-writing one as a self-report. An agent that runs the command, gets
+// exit 1 and no message, has neither a number nor an error — which is
+// exactly the condition that invites the hand-written estimate back in.
+//
+// loadLedgerOrThrow / evaluateCircuitBreakerForSprint exist for that call
+// site: same "no ledger" condition, but surfaced as a typed, catchable error
+// carrying a machine-readable reason instead of vanishing.
+
+/** Machine-readable shape of a missing-ledger failure — `LedgerNotFoundError`
+ * implements this, so a caller that only wants the data (not to `catch` an
+ * `Error` instance) can still narrow on `code`. */
+export interface LedgerLoadFailure {
+  code: "no-ledger";
+  sprint: string;
+  expectedPath: string;
+}
+
+export class LedgerNotFoundError extends Error implements LedgerLoadFailure {
+  readonly code = "no-ledger" as const;
+  readonly sprint: string;
+  readonly expectedPath: string;
+  constructor(sprint: string, expectedPath: string) {
+    super(`no ledger for sprint ${sprint} at ${expectedPath} — run /sage-build first`);
+    this.name = "LedgerNotFoundError";
+    this.sprint = sprint;
+    this.expectedPath = expectedPath;
+  }
+}
+
+/** Same lookup as `loadLedger`, but throws `LedgerNotFoundError` instead of
+ * returning `null` when the sprint has no ledger yet. Use this at any call
+ * site where "no ledger" is a hard stop that must be reported, not a state
+ * the caller has real logic for — `loadLedger` stays available, unchanged,
+ * for callers (like `next()`, below) that do have one. */
+export function loadLedgerOrThrow(sprint: string, root?: string): Ledger {
+  const l = loadLedger(sprint, root);
+  if (!l) throw new LedgerNotFoundError(sprint, ledgerPath(sprint, root));
+  return l;
+}
+
 export function saveLedger(l: Ledger, root?: string): void {
   const p = ledgerPath(l.sprint, root);
   mkdirSync(join(p, ".."), { recursive: true });
@@ -459,4 +510,12 @@ function remainingFindingsAllLow(sprint: string, root?: string): boolean {
  * ledger's Circuit section by hand. */
 export function evaluateCircuitBreaker(l: Ledger, root?: string): WtfResult {
   return computeWtf(deriveWtfSignals(l, root));
+}
+
+/** One-call convenience for the `sage board wtf` call site specifically:
+ * loads the sprint's ledger (throwing `LedgerNotFoundError` — see
+ * `loadLedgerOrThrow` — rather than returning something the CLI can
+ * mistake for a clean zero score) and scores it in one step. */
+export function evaluateCircuitBreakerForSprint(sprint: string, root?: string): WtfResult {
+  return evaluateCircuitBreaker(loadLedgerOrThrow(sprint, root), root);
 }

@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
 # Golden-payload runner for sage-mode hooks.
 #
-# Runs every fixture twice: once letting each hook's own `#!/usr/bin/env sh`
-# shebang pick the interpreter (whatever /bin/sh happens to resolve to on
-# this machine), and once with the hook FORCIBLY invoked under `dash` when
-# it's installed. Every sage-mode hook declares `#!/usr/bin/env sh`, and
-# `sh` is `dash` (not `bash`) on Debian/Ubuntu/GitHub Actions `ubuntu-latest`
-# — bashisms that only bash tolerates (`$'...'` ANSI-C quoting, etc.) pass
-# silently on a dev box where /bin/sh happens to be bash-compatible and only
-# break in that real environment. Forcing an explicit dash pass here makes
-# that break reproducible locally instead of only in CI.
+# Two independent dimensions, both exercised for every fixture:
+#
+#   SHELL:  once letting each hook's own `#!/usr/bin/env sh` shebang pick
+#   the interpreter (whatever /bin/sh happens to resolve to on this
+#   machine), and once with the hook FORCIBLY invoked under `dash` when
+#   it's installed. Every sage-mode hook declares `#!/usr/bin/env sh`, and
+#   `sh` is `dash` (not `bash`) on Debian/Ubuntu/GitHub Actions
+#   `ubuntu-latest` — bashisms that only bash tolerates (`$'...'` ANSI-C
+#   quoting, etc.) pass silently on a dev box where /bin/sh happens to be
+#   bash-compatible and only break in that real environment. Forcing an
+#   explicit dash pass here makes that break reproducible locally instead
+#   of only in CI.
+#
+#   HOST:   once as Cursor (CURSOR_PROJECT_DIR set, compared against the
+#   fixture's plain <base>.out.json) and once as Claude Code
+#   (CLAUDE_PROJECT_DIR set, compared against <base>.claude.out.json) — see
+#   hooks/host-detect.sh and hooks/json-safe.sh's emit_* functions for what
+#   each host's shape actually is. compare.py also checks exit status: 2
+#   for a Claude Code deny, 0 for everything else (Cursor and every
+#   non-deny Claude Code case).
 set -euo pipefail
 HOOKS=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+COMPARE="$HOOKS/tests/compare.py"
 fail=0
 
 # A PATH with a POSIX shell and coreutils but NEITHER python3 NOR node NOR jq
@@ -19,7 +31,16 @@ fail=0
 # fail per their own declared polarity, rather than crashing uncaught, when
 # none of the declared JSON-parsing prerequisites (tech-spec.md §4.1) exist.
 NOBIN=$(mktemp -d)
-trap 'rm -rf "$NOBIN"' EXIT
+# GOT_FILE holds the normalized "got" JSON for compare.py. Previously a
+# hardcoded /tmp/sage-got.json, which fails with "Permission denied" on any
+# shared-/tmp machine where another user already owns that exact path (a
+# stale file from a different user's earlier run — /tmp is not per-user).
+# mktemp gives this run its own private, unpredictable path; both temp
+# paths are cleaned up by the same EXIT trap regardless of how the script
+# exits (success, failure, or an unexpected error).
+GOT_FILE=$(mktemp "${TMPDIR:-/tmp}/sage-hooks-test.XXXXXX")
+trap 'rm -rf "$NOBIN"; rm -f "$GOT_FILE"' EXIT
+
 for b in sh dash bash mktemp cat rm dirname basename sed awk head find sort tail cp mkdir printf true env grep; do
   p=$(command -v "$b" 2>/dev/null) || continue
   ln -sf "$p" "$NOBIN/$b"
@@ -27,15 +48,29 @@ done
 
 shopt -s nullglob
 
-# invoke_hook <hook> <payload-file>  — respects $FORCE_SHELL (empty = rely on
-# the hook's own shebang; otherwise exec it under that interpreter directly).
-invoke_hook() {
-  local hook=$1 payload=$2
+# run_and_compare <hook> <payload> <exp> <env-args...>
+# Invokes the hook with the given `env` arguments (e.g. `CURSOR_PROJECT_DIR=
+# /tmp/x` or `-i PATH=$NOBIN CLAUDE_PROJECT_DIR=/tmp/x HOME=... TMPDIR=...`),
+# respecting $FORCE_SHELL, capturing BOTH stdout and exit status without
+# ever tripping `set -e` (a deny case's exit 2 on Claude Code is an
+# EXPECTED, asserted outcome, not a script error), then hands both off to
+# compare.py.
+run_and_compare() {
+  local hook=$1 payload=$2 exp=$3
+  shift 3
+  local got status
+  set +e
   if [ -n "${FORCE_SHELL:-}" ]; then
-    "$FORCE_SHELL" "$HOOKS/$hook" < "$payload" || true
+    got=$(env "$@" "$FORCE_SHELL" "$HOOKS/$hook" < "$payload")
   else
-    "$HOOKS/$hook" < "$payload" || true
+    got=$(env "$@" "$HOOKS/$hook" < "$payload")
   fi
+  status=$?
+  set -e
+  echo "$got" | python3 -c "import json,sys; s=sys.stdin.read().strip() or '{}'
+try: print(json.dumps(json.loads(s), sort_keys=True))
+except Exception: print(s)" > "$GOT_FILE"
+  python3 "$COMPARE" "$exp" "$GOT_FILE" "$status" || fail=1
 }
 
 run_all_fixtures() {
@@ -45,61 +80,54 @@ run_all_fixtures() {
     [ -d "$dir" ] || continue
     for payload in "$dir"/*.in.json; do
       base=$(basename "$payload" .in.json)
-      exp="$dir/$base.out.json"
-      [ -f "$exp" ] || { echo "missing $exp"; fail=1; continue; }
-      # *-no-interpreter fixtures assert behavior under a PATH with no
-      # python3/node/jq at all; they're PATH-dependent, not shell-dependent,
-      # and are only meaningful in the default (unforced) pass.
-      case "$base" in
-        *no-interpreter*) [ -n "${FORCE_SHELL:-}" ] && continue ;;
-      esac
-      echo "test [$pass_label] $hook $base"
-      if [ "$hook" = "sage-lane" ]; then
-        tmp=$(mktemp -d)
-        mkdir -p "$tmp/.sage"
-        printf '%s\n' '{"owns":["src/api/**"],"node":"n1"}' > "$tmp/.sage/lane"
-        mkdir -p "$tmp/src/api"
+      for host in cursor claude; do
+        if [ "$host" = cursor ]; then
+          projvar=CURSOR_PROJECT_DIR
+          exp="$dir/$base.out.json"
+        else
+          projvar=CLAUDE_PROJECT_DIR
+          exp="$dir/$base.claude.out.json"
+        fi
+        [ -f "$exp" ] || { echo "missing $exp"; fail=1; continue; }
+        # *-no-interpreter fixtures assert behavior under a PATH with no
+        # python3/node/jq at all; they're PATH-dependent, not
+        # shell-dependent, and only meaningful in the default (unforced)
+        # pass.
+        case "$base" in
+          *no-interpreter*) [ -n "${FORCE_SHELL:-}" ] && continue ;;
+        esac
+        echo "test [$pass_label][$host] $hook $base"
+        if [ "$hook" = "sage-lane" ]; then
+          tmp=$(mktemp -d)
+          mkdir -p "$tmp/.sage"
+          printf '%s\n' '{"owns":["src/api/**"],"node":"n1"}' > "$tmp/.sage/lane"
+          mkdir -p "$tmp/src/api"
+        else
+          tmp="${TMPDIR:-/tmp}"
+        fi
         case "$base" in
           *no-interpreter*)
-            got=$(env -i PATH="$NOBIN" CURSOR_PROJECT_DIR="$tmp" HOME="${HOME:-/root}" TMPDIR="${TMPDIR:-/tmp}" "$HOOKS/$hook" < "$payload" || true)
+            run_and_compare "$hook" "$payload" "$exp" \
+              -i PATH="$NOBIN" "$projvar=$tmp" HOME="${HOME:-/root}" TMPDIR="${TMPDIR:-/tmp}"
             ;;
           *)
-            got=$(CURSOR_PROJECT_DIR="$tmp" invoke_hook "$hook" "$payload")
+            run_and_compare "$hook" "$payload" "$exp" "$projvar=$tmp"
             ;;
         esac
-        rm -rf "$tmp"
-      else
-        case "$base" in
-          *no-interpreter*)
-            got=$(env -i PATH="$NOBIN" CURSOR_PROJECT_DIR="${TMPDIR:-/tmp}" HOME="${HOME:-/root}" TMPDIR="${TMPDIR:-/tmp}" "$HOOKS/$hook" < "$payload" || true)
-            ;;
-          *)
-            got=$(CURSOR_PROJECT_DIR="${TMPDIR:-/tmp}" invoke_hook "$hook" "$payload")
-            ;;
-        esac
-      fi
-      echo "$got" | python3 -c "import json,sys; s=sys.stdin.read().strip() or '{}'
-try: print(json.dumps(json.loads(s), sort_keys=True))
-except Exception: print(s)" > /tmp/sage-got.json
-      # A bare "*" string anywhere in the expected fixture matches any value
-      # at that position (used by sage-bootstrap's SAGE_HOME / rendered
-      # context, which are environment-dependent).
-      python3 -c "import json,sys
-
-def matches(exp, got):
-    if exp == '*':
-        return True
-    if isinstance(exp, dict):
-        return isinstance(got, dict) and set(exp) == set(got) and all(matches(exp[k], got[k]) for k in exp)
-    if isinstance(exp, list):
-        return isinstance(got, list) and len(exp) == len(got) and all(matches(e, g) for e, g in zip(exp, got))
-    return exp == got
-
-exp = json.loads(open(sys.argv[1]).read() or '{}')
-got = json.loads(open('/tmp/sage-got.json').read().strip() or '{}')
-if not matches(exp, got):
-    print('FAIL', sys.argv[1], '\n expect', json.dumps(exp, sort_keys=True), '\n got   ', json.dumps(got, sort_keys=True)); sys.exit(1)
-print('ok')" "$exp" || fail=1
+        # NOT written as `[ ... ] && rm -rf "$tmp"`: under `set -e`, a `&&`
+        # list's non-last operand failing is normally exempt from
+        # triggering -e — EXCEPT when that list is the last command
+        # actually executed inside a function (its exit status then
+        # becomes the function's own return status), which it is here on
+        # every non-sage-lane hook's very last fixture/host iteration. That
+        # propagated a false "failure" up through the unguarded
+        # `run_all_fixtures` call in main and aborted the whole script
+        # after only the very first pass. `if` avoids it: `if false; then
+        # ...; fi` with no else always returns 0.
+        if [ "$hook" = "sage-lane" ]; then
+          rm -rf "$tmp"
+        fi
+      done
     done
   done
 }
@@ -116,7 +144,9 @@ fi
 # M2 — back-to-back subagentStart dispatches must each get the CORRECT
 # decision, and a parent-role marker must never outlive the dispatch it was
 # written for (the "stale marker denies everything forever" bug). Run this
-# sequence under both bash and dash (when available).
+# sequence under both bash and dash (when available). sage-solo has no
+# Claude Code registration (see hooks-claude.json's own comments), so this
+# sequence stays Cursor-only, unlike run_all_fixtures above.
 run_solo_sequence() {
   local shell_bin=$1 label=$2
   echo "test [$label] sage-solo back-to-back-dispatch-sequence"

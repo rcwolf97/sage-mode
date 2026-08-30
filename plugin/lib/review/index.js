@@ -1,4 +1,5 @@
-import { git } from "../util.js";
+import { join, relative, sep } from "node:path";
+import { git, gitRoot, projectDocsDir } from "../util.js";
 const AUTH = /auth|session|jwt|oauth|permission|role/i;
 const BACKEND = /(server|api\/|src\/api|backend|internal\/)/i;
 const FRONTEND = /\.(tsx|jsx|css|scss|vue|svelte|html)$/i;
@@ -12,15 +13,98 @@ export function fingerprint(f) {
         return f.fingerprint;
     return f.line ? `${f.path}:${f.line}:${f.category}` : `${f.path}:${f.category}`;
 }
+// ---------------------------------------------------------------------------
+// Finding row validation (schemas/finding.schema.json), enforced at gate()
+// ---------------------------------------------------------------------------
+//
+// architecture-v3 §8.3 claims the finding shape is enforced "at the tool
+// layer" via `--json-schema`. True for the Lane B path (`claude -p
+// --json-schema`) — FALSE for Lane C, where the reviewer runs as a Cursor/
+// Claude subagent: `output_schema` is not a documented subagent frontmatter
+// field on either host. So malformed JSONL from a Lane C specialist had
+// nothing between it and gate()/dedup() — a broken specialist that emits a
+// row missing `severity`, or a `confidence` of 47, would flow straight
+// through and *look like a clean bill of health*.
+//
+// Hand-rolled against schemas/finding.schema.json's actual constraints,
+// following lib/dag/index.ts's validate() style (explicit field checks, not
+// a generic JSON Schema interpreter) — this repo has zero runtime npm
+// dependencies and stays that way. A row failing any check is REJECTED with
+// a reason, never silently dropped (the reason travels with it — see
+// gate()) and never silently coerced (a non-integer or out-of-range
+// confidence is a rejection, not something rounded/clamped into range).
+const SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM", "NITPICK"]);
+const REQUIRED_NONEMPTY_STRING_FIELDS = ["path", "category", "summary", "specialist"];
+const OPTIONAL_STRING_FIELDS = ["evidence", "fix", "test_stub", "fingerprint"];
+/** Validates one raw, untrusted JSON value against the finding schema's
+ * actual constraints (required fields; severity enum; integer confidence in
+ * 1-10; non-empty path/category/summary/specialist; integer line >= 1 when
+ * present; string-typed optional fields; boolean cannot_verify when
+ * present). additionalProperties stays true per the schema — unknown extra
+ * fields are not a rejection reason. */
+export function validateFindingRow(row) {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) {
+        return { ok: false, reason: "row is not a JSON object" };
+    }
+    const r = row;
+    for (const field of ["severity", "confidence", "path", "category", "summary", "specialist"]) {
+        if (r[field] === undefined || r[field] === null) {
+            return { ok: false, reason: `missing required field "${field}"` };
+        }
+    }
+    if (typeof r.severity !== "string" || !SEVERITIES.has(r.severity)) {
+        return {
+            ok: false,
+            reason: `severity must be one of CRITICAL, HIGH, MEDIUM, NITPICK — got ${JSON.stringify(r.severity)}`,
+        };
+    }
+    if (typeof r.confidence !== "number" || !Number.isInteger(r.confidence) || r.confidence < 1 || r.confidence > 10) {
+        return { ok: false, reason: `confidence must be an integer 1-10 — got ${JSON.stringify(r.confidence)}` };
+    }
+    for (const field of REQUIRED_NONEMPTY_STRING_FIELDS) {
+        const v = r[field];
+        if (typeof v !== "string" || v.length < 1) {
+            return { ok: false, reason: `"${field}" must be a non-empty string — got ${JSON.stringify(v)}` };
+        }
+    }
+    if (r.line !== undefined) {
+        if (typeof r.line !== "number" || !Number.isInteger(r.line) || r.line < 1) {
+            return { ok: false, reason: `line must be an integer >= 1 when present — got ${JSON.stringify(r.line)}` };
+        }
+    }
+    for (const field of OPTIONAL_STRING_FIELDS) {
+        if (r[field] !== undefined && typeof r[field] !== "string") {
+            return { ok: false, reason: `"${field}" must be a string when present — got ${JSON.stringify(r[field])}` };
+        }
+    }
+    if (r.cannot_verify !== undefined && typeof r.cannot_verify !== "boolean") {
+        return { ok: false, reason: `cannot_verify must be a boolean when present — got ${JSON.stringify(r.cannot_verify)}` };
+    }
+    return { ok: true, finding: row };
+}
 export function gate(findings) {
-    return findings.map((f) => {
+    const accepted = [];
+    const rejected = [];
+    for (const row of findings) {
+        const v = validateFindingRow(row);
+        if (!v.ok) {
+            rejected.push({ row, reason: v.reason });
+            continue;
+        }
+        const f = v.finding;
         const copy = { ...f, fingerprint: fingerprint(f) };
-        if (!copy.evidence || !copy.evidence.trim()) {
+        // Findings the reviewer flagged as `cannot_verify` are, by definition,
+        // ones the diff cannot supply evidence for — the whole point is that the
+        // evidence isn't in the diff. Capping their confidence for missing
+        // `evidence` would defeat that; every other finding keeps the existing
+        // low-evidence-caps-confidence rule.
+        if (!copy.cannot_verify && (!copy.evidence || !copy.evidence.trim())) {
             copy.confidence = Math.min(copy.confidence, 5);
         }
         copy.confidence = Math.max(1, Math.min(10, Math.round(copy.confidence)));
-        return copy;
-    });
+        accepted.push(copy);
+    }
+    return Object.assign(accepted, { rejected });
 }
 export function parseJsonl(text) {
     const out = [];
@@ -57,6 +141,12 @@ export function dedup(findings) {
             keep.summary = `MULTI-SPECIALIST CONFIRMED (${specialists.join(" + ")}) ${keep.summary}`;
             keep.confidence = Math.min(10, keep.confidence + 1);
         }
+        // A cannot_verify finding must survive dedup as cannot_verify even when
+        // merged under a higher-confidence duplicate that didn't flag it that
+        // way — otherwise whichever specialist happened to score higher would
+        // silently erase the "check this by hand" signal the other one raised.
+        if (group.some((g) => g.cannot_verify))
+            keep.cannot_verify = true;
         out.push(keep);
     }
     return out;
@@ -70,30 +160,91 @@ export function classifyBand(confidence) {
         return "appendix";
     return "suppress";
 }
+/** classifyBand's confidence-only bands, plus the first-class "cannot_verify"
+ * outcome: a finding for a requirement the diff doesn't touch, which no
+ * confidence score can honestly represent — it isn't "low confidence this is
+ * a bug," it's "unjudgeable from what changed." Routed to its own outcome
+ * unconditionally (checked before, and independent of, confidence) so a
+ * renderer can put these in their own section instead of folding them into
+ * a confidence band that implies a pass/fail judgment was actually made. */
+export function classifyFinding(f) {
+    if (f.cannot_verify)
+        return "cannot_verify";
+    return classifyBand(f.confidence);
+}
+// ---------------------------------------------------------------------------
+// Sage's own scratch output is not review scope
+// ---------------------------------------------------------------------------
+//
+// Reproduced bug: `sage review scope` picked up .sage/sprints/NN/evidence.jsonl,
+// .sage/sprints/NN/logs/*, and .worktrees/<node>/ — sage-mode's own bookkeeping
+// and per-node worktree checkouts — as if they were reviewable source changes.
+// None of them matched any SCOPE_* category, so scope() set error:"unmatched"
+// and the CLI exits 2, which the skill escalates to the user as a classifier
+// bug. It isn't one: the tool's own scratch output manufactured the alarm.
+//
+// Fix is an unconditional exclusion, applied to the *union* of committed
+// diff + working-tree diff + untracked files before anything else runs —
+// classification, the unmatched check, and DIFF_LINES all see only the
+// filtered set. This is deliberately independent of whether .sage/ and
+// .worktrees/ are actually gitignored (see lib/evidence/index.ts's
+// checkSageIgnored for that separate, real concern): even a repo that force-
+// adds these paths, or one where evidence.jsonl was accidentally committed
+// once, must not have sage's own artifacts pollute review scope. The
+// deliberate union of committed + working-tree + untracked diffs itself is
+// unchanged and intentional — uncommitted WIP should still select reviewers.
+const SAGE_SCRATCH_PREFIXES = [".sage/", ".worktrees/"];
+function isSageScratchPath(path, notebookAssetsRelDir) {
+    if (SAGE_SCRATCH_PREFIXES.some((p) => path === p.slice(0, -1) || path.startsWith(p)))
+        return true;
+    if (notebookAssetsRelDir && (path === notebookAssetsRelDir || path.startsWith(notebookAssetsRelDir + "/"))) {
+        return true;
+    }
+    return false;
+}
+// Resolves to the project's notebook asset directory (default docs/assets,
+// or <config notebook.root>/assets — see lib/notebook/index.ts's copyAssets,
+// which is what actually writes there), relative to the repo root so it can
+// be compared against git's root-relative path output. Returns null when the
+// repo root can't be determined (e.g. cwd isn't inside a git repo at all) —
+// nothing to resolve against, and scope() already handles that case via the
+// no_base check on `opts.base`.
+function notebookAssetsRelDir(cwd) {
+    const root = gitRoot(cwd);
+    if (!root)
+        return null;
+    const assetsAbs = join(projectDocsDir(root), "assets");
+    const rel = relative(root, assetsAbs).split(sep).join("/");
+    return rel || null;
+}
 export function scope(opts) {
     const cwd = opts.cwd || process.cwd();
     const baseCheck = git(["rev-parse", "--verify", opts.base], cwd);
     if (baseCheck.status !== 0) {
         return emptyScope("no_base");
     }
-    const committed = git(["diff", "--name-only", opts.base], cwd)
+    const assetsRel = notebookAssetsRelDir(cwd);
+    const excludeScratch = (rows) => rows.filter((f) => !isSageScratchPath(f, assetsRel));
+    const committed = excludeScratch(git(["diff", "--name-only", opts.base], cwd)
         .stdout.split("\n")
         .map((s) => s.trim())
-        .filter(Boolean);
-    const wt = git(["diff", "--name-only"], cwd)
+        .filter(Boolean));
+    const wt = excludeScratch(git(["diff", "--name-only"], cwd)
         .stdout.split("\n")
         .map((s) => s.trim())
-        .filter(Boolean);
-    const untracked = git(["ls-files", "--others", "--exclude-standard"], cwd)
+        .filter(Boolean));
+    const untracked = excludeScratch(git(["ls-files", "--others", "--exclude-standard"], cwd)
         .stdout.split("\n")
         .map((s) => s.trim())
-        .filter(Boolean);
+        .filter(Boolean));
     const files = [...new Set([...committed, ...wt, ...untracked])];
     const stat = git(["diff", "--numstat", opts.base], cwd).stdout;
     let lines = 0;
     for (const row of stat.split("\n")) {
-        const m = row.match(/^(\d+|-)\s+(\d+|-)/);
+        const m = row.match(/^(\d+|-)\s+(\d+|-)\s+(.*)$/);
         if (!m)
+            continue;
+        if (isSageScratchPath(m[3].trim(), assetsRel))
             continue;
         if (m[1] !== "-")
             lines += Number(m[1]);
@@ -275,6 +426,10 @@ export function checkRecommendation(reviewMarkdown) {
     return { ok: issues.length === 0, issues };
 }
 export function classifyFix(f) {
+    // A cannot_verify finding has no diff evidence behind it by definition —
+    // there is nothing here an auto-fix could safely act on. Always ASK.
+    if (f.cannot_verify)
+        return "ASK";
     if (f.test_stub)
         return "ASK";
     if (f.severity === "CRITICAL")

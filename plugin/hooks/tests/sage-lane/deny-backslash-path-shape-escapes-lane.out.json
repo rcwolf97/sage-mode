@@ -1,1 +1,1 @@
-{"permission": "deny", "agent_message": "[lane] src\\api\\pwned.ts is outside owns ['src/api/**']. Request a lane amendment rather than retry."}
+{"permission": "deny", "agent_message": "[lane] src\\api\\pwned.ts is outside owns ['src/api/**']. Request a lane amendment rather than retry.", "user_message": "[lane] src\\api\\pwned.ts is outside owns ['src/api/**']. Request a lane amendment rather than retry."}

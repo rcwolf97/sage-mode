@@ -15,6 +15,7 @@
     "fix": { "type": "string" },
     "test_stub": { "type": "string" },
     "fingerprint": { "type": "string" },
-    "specialist": { "type": "string", "minLength": 1 }
+    "specialist": { "type": "string", "minLength": 1 },
+    "cannot_verify": { "type": "boolean" }
   }
 }

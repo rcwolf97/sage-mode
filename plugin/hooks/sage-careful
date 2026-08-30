@@ -1,23 +1,24 @@
 #!/usr/bin/env sh
-# sage-careful — beforeShellExecution. Ask-tier; never failClosed.
+# sage-careful — beforeShellExecution (Cursor) / PreToolUse matcher "Bash"
+# (Claude Code — there is no beforeShellExecution event there). Ask-tier;
+# never failClosed.
 # HIGH deny only for simple (non-compound) recursive delete of / ~ $HOME /* and force-push to default branch.
 set -eu
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 . "$DIR/json-safe.sh"
+. "$DIR/host-detect.sh"
 json_read
+sage_detect_host
 # POSIX-portable literal newline for use inside case patterns (the $'\n'
 # ANSI-C-quote form is a bash extension and is silently a no-op glob under
 # dash, defeating embedded-newline / compound-command detection).
 NL='
 '
 if [ -z "${JSON_IN:-}" ]; then
-  printf '%s\n' '{}'
-  exit 0
+  emit_allow
 fi
 if ! json_valid; then
-  # fail open to ask
-  python3 -c 'import json; print(json.dumps({"permission":"ask","agent_message":"[careful] Could not parse payload. Asking (fail open)."}))' 2>/dev/null || printf '%s\n' '{"permission":"ask"}'
-  exit 0
+  emit_ask "[careful] Could not parse payload. Asking (fail open)."
 fi
 
 CMD=$(json_get command)
@@ -25,21 +26,19 @@ CMD=$(json_get command)
 
 # one-turn escape hatch
 UNSAFE=""
-ROOT="${CURSOR_PROJECT_DIR:-.}"
+ROOT="$SAGE_PROJECT_DIR"
 if [ -f "$ROOT/.sage/unsafe" ]; then
   UNSAFE=1
   rm -f "$ROOT/.sage/unsafe"
 fi
 if [ -n "$UNSAFE" ]; then
-  printf '%s\n' '{}'
-  exit 0
+  emit_allow
 fi
 
 # obfuscation tripwire — ASK first
 case "$CMD" in
   *'${IFS}'*|*'${ifs}'*|*base64*\|*sh*|*base64*\|*bash*)
-    python3 -c 'import json; print(json.dumps({"permission":"ask","agent_message":"[careful] Obfuscated command. Confirm before running."}))' 2>/dev/null || printf '%s\n' '{"permission":"ask"}'
-    exit 0
+    emit_ask "[careful] Obfuscated command. Confirm before running."
     ;;
 esac
 
@@ -53,20 +52,15 @@ case "$CMD" in
   *"$NL"*) ;;
   'rm -rf node_modules'|'rm -rf .next'|'rm -rf dist'|'rm -rf __pycache__'|'rm -rf .cache'|'rm -rf build'|'rm -rf .turbo'|'rm -rf coverage'|\
   'rm -rf ./node_modules'|'rm -rf ./dist')
-    printf '%s\n' '{}'
-    exit 0
+    emit_allow
     ;;
 esac
 
 deny() {
-  msg=$1
-  python3 -c 'import json,sys; print(json.dumps({"permission":"deny","agent_message":sys.argv[1],"user_message":sys.argv[1]}))' "$msg" 2>/dev/null || printf '%s\n' '{"permission":"deny"}'
-  exit 0
+  emit_deny "$1"
 }
 ask() {
-  msg=$1
-  python3 -c 'import json,sys; print(json.dumps({"permission":"ask","agent_message":sys.argv[1],"user_message":sys.argv[1]}))' "$msg" 2>/dev/null || printf '%s\n' '{"permission":"ask"}'
-  exit 0
+  emit_ask "$1"
 }
 
 # Token-aware scan of $CMD, computed unconditionally (not just when
@@ -217,5 +211,4 @@ esac
 
 [ "$MED_ASK" = 1 ] && ask "[careful] Destructive command. Confirm to proceed."
 
-printf '%s\n' '{}'
-exit 0
+emit_allow

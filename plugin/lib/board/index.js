@@ -112,6 +112,28 @@ export function loadLedger(sprint, root) {
         return null;
     return parseLedger(readFileSync(p, "utf8"));
 }
+export class LedgerNotFoundError extends Error {
+    code = "no-ledger";
+    sprint;
+    expectedPath;
+    constructor(sprint, expectedPath) {
+        super(`no ledger for sprint ${sprint} at ${expectedPath} — run /sage-build first`);
+        this.name = "LedgerNotFoundError";
+        this.sprint = sprint;
+        this.expectedPath = expectedPath;
+    }
+}
+/** Same lookup as `loadLedger`, but throws `LedgerNotFoundError` instead of
+ * returning `null` when the sprint has no ledger yet. Use this at any call
+ * site where "no ledger" is a hard stop that must be reported, not a state
+ * the caller has real logic for — `loadLedger` stays available, unchanged,
+ * for callers (like `next()`, below) that do have one. */
+export function loadLedgerOrThrow(sprint, root) {
+    const l = loadLedger(sprint, root);
+    if (!l)
+        throw new LedgerNotFoundError(sprint, ledgerPath(sprint, root));
+    return l;
+}
 export function saveLedger(l, root) {
     const p = ledgerPath(l.sprint, root);
     mkdirSync(join(p, ".."), { recursive: true });
@@ -323,4 +345,11 @@ function remainingFindingsAllLow(sprint, root) {
  * ledger's Circuit section by hand. */
 export function evaluateCircuitBreaker(l, root) {
     return computeWtf(deriveWtfSignals(l, root));
+}
+/** One-call convenience for the `sage board wtf` call site specifically:
+ * loads the sprint's ledger (throwing `LedgerNotFoundError` — see
+ * `loadLedgerOrThrow` — rather than returning something the CLI can
+ * mistake for a clean zero score) and scores it in one step. */
+export function evaluateCircuitBreakerForSprint(sprint, root) {
+    return evaluateCircuitBreaker(loadLedgerOrThrow(sprint, root), root);
 }

@@ -93,7 +93,12 @@ test("evidence check grades STALE when wtree is absent, malformed, or not 40 hex
 });
 test("evidence run returns the child exit code even when ledger append fails", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sage-ev-"));
-    gitInit(dir);
+    // .sage/ must be gitignored here (gitInitIgnoringSage, not gitInit) —
+    // otherwise this now hits the self-invalidation guard added for bug (2)
+    // and run() refuses to start at all, which is a different behavior than
+    // the one this test exists to pin (exit-code passthrough around a ledger
+    // append failure).
+    gitInitIgnoringSage(dir);
     // make sprints path a file so append fails
     mkdirSync(join(dir, ".sage"), { recursive: true });
     writeFileSync(join(dir, ".sage", "sprints"), "not-a-dir");
@@ -137,5 +142,108 @@ test("evidence TOCTOU: a test command that mutates a tracked file and reverts it
     await run({ label: "tests", command: ["sh", "-c", "echo two > a.txt; echo one > a.txt"], cwd: dir });
     const r = check({ label: "tests", cwd: dir });
     assert.equal(r.grade, "STALE");
+});
+// -----------------------------------------------------------------------
+// Bug (2): evidence self-invalidation when .sage/ isn't gitignored.
+// -----------------------------------------------------------------------
+//
+// Reproduced: without a .gitignore entry for .sage/, run()'s own log-file
+// write is itself an untracked working-tree change, so the TOCTOU guard
+// (correctly) never records a wtree, and check() then grades every run
+// STALE forever with a reason string ("wtree missing or not 40 hex
+// characters") that names no actual cause. The fix is to detect the
+// unignored state up front and FAIL LOUD instead of running a check that
+// can never pass — these tests pin that new behavior directly, plus the
+// --allow-unignored escape hatch for a caller who wants the old (broken)
+// behavior anyway.
+function captureStderr() {
+    const chunks = [];
+    const real = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk) => {
+        chunks.push(String(chunk));
+        return true;
+    });
+    return {
+        text: () => chunks.join(""),
+        restore: () => {
+            process.stderr.write = real;
+        },
+    };
+}
+test("evidence run refuses to start (loudly) when .sage/ is not gitignored", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-ev-"));
+    gitInit(dir); // deliberately no .gitignore entry for .sage/
+    const cap = captureStderr();
+    let code;
+    try {
+        code = await run({ label: "tests", command: ["true"], cwd: dir });
+    }
+    finally {
+        cap.restore();
+    }
+    assert.equal(code, 1);
+    const err = cap.text();
+    assert.match(err, /not gitignored/);
+    assert.match(err, /\.sage\//);
+    assert.match(err, /--allow-unignored/);
+    // Must not have run the command at all — no evidence record written.
+    assert.equal(existsSync(join(dir, ".sage", "sprints", "00", "evidence.jsonl")), false);
+});
+test("evidence run --allow-unignored downgrades the FAIL to a warning and proceeds, reproducing the original silent-forever-STALE bug", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-ev-"));
+    gitInit(dir); // .sage/ not gitignored
+    const cap = captureStderr();
+    let code;
+    try {
+        code = await run({ label: "tests", command: ["true"], cwd: dir, allowUnignored: true });
+    }
+    finally {
+        cap.restore();
+    }
+    assert.equal(code, 0);
+    assert.match(cap.text(), /warning:.*not gitignored/s);
+    // The run did proceed and record something, but — this is the bug this
+    // module can only warn about, not fix outright, once the caller has
+    // opted in — the run's own bookkeeping write means it can never grade
+    // FRESH: run() truthfully leaves wtree unset rather than fabricating one.
+    const r = check({ label: "tests", cwd: dir });
+    assert.equal(r.grade, "STALE");
+    assert.match(r.reason, /gitignored/);
+});
+test("evidence run proceeds normally (no warning) when .sage/ and .worktrees/ are both gitignored", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-ev-"));
+    gitInitIgnoringSage(dir);
+    const cap = captureStderr();
+    let code;
+    try {
+        code = await run({ label: "tests", command: ["true"], cwd: dir });
+    }
+    finally {
+        cap.restore();
+    }
+    assert.equal(code, 0);
+    assert.equal(cap.text(), "");
+    const r = check({ label: "tests", cwd: dir });
+    assert.equal(r.grade, "FRESH");
+});
+test("evidence check STALE reasons name their actual cause instead of a generic 'wtree missing' message", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-ev-"));
+    gitInit(dir);
+    const r1 = check({ label: "nope", cwd: dir });
+    assert.equal(r1.grade, "STALE");
+    assert.match(r1.reason, /no evidence record/);
+    mkdirSync(join(dir, ".sage", "sprints", "00"), { recursive: true });
+    const ledger = join(dir, ".sage", "sprints", "00", "evidence.jsonl");
+    writeFileSync(ledger, JSON.stringify({
+        ts: new Date().toISOString(),
+        label: "tests",
+        command: "true",
+        cmd_sha256: "x",
+        exit: 1,
+        duration_s: 0,
+    }) + "\n");
+    const r2 = check({ label: "tests", cwd: dir });
+    assert.equal(r2.grade, "STALE");
+    assert.match(r2.reason, /exited 1/);
 });
 void existsSync;

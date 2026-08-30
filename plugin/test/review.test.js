@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { gate, dedup, checkRecommendation, SPECIALIST_ROSTER } from "../lib/review/index.js";
+import { gate, dedup, checkRecommendation, SPECIALIST_ROSTER, scope, validateFindingRow, classifyFinding, classifyFix, } from "../lib/review/index.js";
 test("review gate caps confidence at 5 when evidence is empty even if input claims 9", () => {
     const out = gate([
         {
@@ -126,6 +128,155 @@ test("checkRecommendation fails when the section exists but is empty", () => {
     const out = checkRecommendation(md);
     assert.equal(out.ok, false);
     assert.ok(out.issues.some((i) => i.includes("empty")));
+});
+// -----------------------------------------------------------------------
+// Bug (3): review scope polluted by sage-mode's own artifacts
+// -----------------------------------------------------------------------
+//
+// Reproduced: `sage review scope --base HEAD` picked up
+// .sage/sprints/00/evidence.jsonl, .sage/sprints/00/logs/tests-*.log, and
+// .worktrees/s01-n1/ as "changed files," none of which matched any SCOPE_*
+// category, tripping SCOPE_ERROR=unmatched (exit 2) — which the skill
+// escalates to the user as a classifier bug even though sage's own scratch
+// output caused it. This repo mixes real source changes with sage scratch
+// in every shape the bug report named: an untracked evidence.jsonl and log
+// file, an untracked worktree checkout, and — the sharper case — a
+// previously (accidentally) committed evidence.jsonl that then gets
+// modified, so it would also show up in the committed-diff numstat, not
+// just the untracked-file listing.
+function gitInit(dir) {
+    spawnSync("git", ["init"], { cwd: dir });
+    spawnSync("git", ["config", "user.email", "t@t.t"], { cwd: dir });
+    spawnSync("git", ["config", "user.name", "t"], { cwd: dir });
+}
+test("review scope excludes .sage/ and .worktrees/ from files and DIFF_LINES, so a repo with both real changes and sage scratch reports only the real ones (no SCOPE_ERROR)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-review-scope-"));
+    gitInit(dir);
+    mkdirSync(join(dir, "src", "api"), { recursive: true });
+    writeFileSync(join(dir, "src", "api", "handler.ts"), "export const a = 1;\n");
+    // A sage evidence.jsonl that was (wrongly) committed once, so a later edit
+    // to it shows up in the *committed* diff, not just as an untracked file —
+    // exercising the --numstat exclusion path, not only the file-list one.
+    mkdirSync(join(dir, ".sage", "sprints", "00"), { recursive: true });
+    writeFileSync(join(dir, ".sage", "sprints", "00", "evidence.jsonl"), '{"label":"old"}\n');
+    spawnSync("git", ["add", "-A"], { cwd: dir });
+    spawnSync("git", ["commit", "-m", "init"], { cwd: dir });
+    // Real source change.
+    writeFileSync(join(dir, "src", "api", "handler.ts"), "export const a = 2;\nexport const b = 3;\n");
+    // Modify the already-tracked evidence.jsonl (committed diff).
+    writeFileSync(join(dir, ".sage", "sprints", "00", "evidence.jsonl"), '{"label":"old"}\n{"label":"new"}\n');
+    // Untracked sage scratch: a fresh log file and a node worktree checkout —
+    // exactly the shapes the bug report named.
+    mkdirSync(join(dir, ".sage", "sprints", "00", "logs"), { recursive: true });
+    writeFileSync(join(dir, ".sage", "sprints", "00", "logs", "tests-abc.log"), "log output\n");
+    mkdirSync(join(dir, ".worktrees", "s01-n1"), { recursive: true });
+    writeFileSync(join(dir, ".worktrees", "s01-n1", "scratch.txt"), "worktree checkout\n");
+    const s = scope({ base: "HEAD", cwd: dir });
+    assert.equal(s.error, undefined, `expected no SCOPE_ERROR, got ${s.error}`);
+    assert.deepEqual(s.files, ["src/api/handler.ts"]);
+    assert.ok(!s.files.some((f) => f.startsWith(".sage/") || f.startsWith(".worktrees/")), "files must not include any .sage/ or .worktrees/ path");
+    assert.ok(s.SCOPE_BACKEND, "src/api/handler.ts should still classify as backend scope");
+    // DIFF_LINES must come only from the real file's numstat row (2 added, 1
+    // removed = 3), not from evidence.jsonl's own +1/-0 committed-diff row.
+    assert.equal(s.DIFF_LINES, 3);
+});
+// -----------------------------------------------------------------------
+// Bug (4): finding rows are validated at the gate
+// -----------------------------------------------------------------------
+//
+// architecture-v3 §8.3 claims the finding shape is enforced "at the tool
+// layer," which is only true for the Lane B `claude -p --json-schema` path —
+// Lane C subagents have nothing analogous, so malformed JSONL from a broken
+// specialist flowed straight through gate() into a "clean" result. These
+// tests pin the fix: gate() now rejects malformed rows with a reason
+// (attached, not lost) instead of coercing or silently dropping them.
+const validFinding = () => ({
+    severity: "HIGH",
+    confidence: 8,
+    path: "src/a.ts",
+    line: 10,
+    category: "security",
+    summary: "issue",
+    evidence: "const x = 1",
+    specialist: "security",
+});
+test("validateFindingRow rejects a row missing a required field, with a reason naming the field", () => {
+    const row = validFinding();
+    delete row.severity;
+    const v = validateFindingRow(row);
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /severity/);
+});
+test("validateFindingRow rejects an out-of-range confidence instead of silently clamping it", () => {
+    const v = validateFindingRow({ ...validFinding(), confidence: 47 });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /confidence/);
+});
+test("validateFindingRow rejects a non-integer confidence instead of silently rounding it", () => {
+    const v = validateFindingRow({ ...validFinding(), confidence: 8.5 });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /confidence/);
+});
+test("validateFindingRow rejects an invalid severity", () => {
+    const v = validateFindingRow({ ...validFinding(), severity: "LOW" });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /severity/);
+});
+test("validateFindingRow accepts a well-formed row", () => {
+    const v = validateFindingRow(validFinding());
+    assert.equal(v.ok, true);
+});
+test("gate() rejects malformed rows with a reason instead of dropping them silently or letting them through as a clean bill of health", () => {
+    const good = validFinding();
+    const missingField = { ...validFinding() };
+    delete missingField.path;
+    const badConfidence = { ...validFinding(), confidence: 99 };
+    const out = gate([good, missingField, badConfidence]);
+    assert.equal(out.length, 1, "only the well-formed row should be accepted");
+    assert.equal(out[0].path, "src/a.ts");
+    assert.equal(out.rejected.length, 2, "both malformed rows must be reported, not dropped");
+    assert.ok(out.rejected.some((r) => r.reason.includes("path")));
+    assert.ok(out.rejected.some((r) => r.reason.includes("confidence")));
+});
+test("gate() still behaves exactly as before for well-formed input (indexable Finding[], toJsonl/JSON.stringify-compatible)", () => {
+    const out = gate([validFinding()]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].confidence, 8);
+    assert.deepEqual(JSON.parse(JSON.stringify(out)), [
+        { ...validFinding(), fingerprint: "src/a.ts:10:security" },
+    ]);
+});
+// -----------------------------------------------------------------------
+// Bug (5): the "cannot verify from the diff" verdict
+// -----------------------------------------------------------------------
+test("cannot_verify findings are not gate-capped for missing evidence", () => {
+    const f = { ...validFinding(), confidence: 9, evidence: "", cannot_verify: true };
+    const out = gate([f]);
+    assert.equal(out[0].confidence, 9, "confidence must not be capped at 5 just because evidence is empty");
+});
+test("an ordinary (non-cannot_verify) finding with empty evidence is still capped at 5, unchanged", () => {
+    const f = { ...validFinding(), confidence: 9, evidence: "" };
+    const out = gate([f]);
+    assert.equal(out[0].confidence, 5);
+});
+test("cannot_verify findings survive dedup, and the flag propagates even when merged under a higher-confidence duplicate that didn't set it", () => {
+    const a = { ...validFinding(), specialist: "security", confidence: 8, cannot_verify: true };
+    const b = { ...validFinding(), specialist: "correctness", confidence: 9, cannot_verify: false };
+    const out = dedup([a, b]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].cannot_verify, true);
+});
+test("classifyFinding routes cannot_verify findings to their own outcome regardless of confidence", () => {
+    const high = { ...validFinding(), confidence: 9, cannot_verify: true };
+    const low = { ...validFinding(), confidence: 2, cannot_verify: true };
+    assert.equal(classifyFinding(high), "cannot_verify");
+    assert.equal(classifyFinding(low), "cannot_verify");
+    const normal = { ...validFinding(), confidence: 9 };
+    assert.equal(classifyFinding(normal), "show");
+});
+test("classifyFix always asks a human for a cannot_verify finding, never auto-fixes", () => {
+    const f = { ...validFinding(), severity: "NITPICK", cannot_verify: true };
+    assert.equal(classifyFix(f), "ASK");
 });
 // sage-review/SKILL.md step 3 tells the dispatcher to pass a checklist
 // *path* — skills/sage-review/references/checklists/<specialist>.md — for

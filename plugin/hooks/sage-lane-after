@@ -1,18 +1,39 @@
 #!/usr/bin/env sh
-# sage-lane-after — detect-and-revert fallback when Write path is only visible after the fact.
+# sage-lane-after — detect-and-revert fallback when Write path is only
+# visible after the fact. Registered on afterFileEdit (Cursor) AND on
+# PostToolUse matcher "Write|Edit|MultiEdit|NotebookEdit" (Claude Code) —
+# in ADDITION to the preventive preToolUse/PreToolUse sage-lane
+# registration, not instead of it (see hooks/hooks.json and
+# hooks/hooks-claude.json). PostToolUse cannot block an already-completed
+# edit, so this hook only ever logs; it never denies, regardless of host.
 set -eu
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 . "$DIR/json-safe.sh"
+. "$DIR/host-detect.sh"
 json_read
-ROOT="${CURSOR_PROJECT_DIR:-.}"
+sage_detect_host
+ROOT="$SAGE_PROJECT_DIR"
 LANE="$ROOT/.sage/lane"
 LOG="$ROOT/.sage/lane-violations.jsonl"
 if [ ! -f "$LANE" ]; then
-  printf '%s\n' '{}'
-  exit 0
+  emit_allow
 fi
+# Cursor's afterFileEdit payload carries file_path at the top level; Claude
+# Code's PostToolUse payload carries it nested under tool_input (per its
+# documented shape: tool_input.file_path for Write/Edit/MultiEdit/
+# NotebookEdit). Try both, top-level first (unchanged priority from before
+# Claude Code support), so this keeps working under either host regardless
+# of which SAGE_HOST detection actually resolved to (belt and braces: even
+# if host detection is somehow wrong, the right key still gets found).
 PATH_VAL=$(json_get file_path)
-[ -n "$PATH_VAL" ] || { printf '%s\n' '{}'; exit 0; }
+[ -n "$PATH_VAL" ] || PATH_VAL=$(json_get tool_input.file_path)
+[ -n "$PATH_VAL" ] || emit_allow
+
+# Best-effort logging only — this hook can never deny (PostToolUse/
+# afterFileEdit fire after the edit already happened, so there is nothing
+# left to block). A missing interpreter just means the violation log entry
+# is silently skipped; the hook still allows.
+if command -v python3 >/dev/null 2>&1; then
 python3 - "$LANE" "$PATH_VAL" "$ROOT" "$LOG" <<'PY'
 import json, os, sys, fnmatch, time
 lane_path, target, root, log = sys.argv[1:5]
@@ -27,6 +48,35 @@ if not ok:
     os.makedirs(os.path.dirname(log), exist_ok=True)
     with open(log, "a") as f:
         f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "path": rel, "owns": owns})+"\n")
-print("{}")
 PY
-exit 0
+elif command -v node >/dev/null 2>&1; then
+node - "$LANE" "$PATH_VAL" "$ROOT" "$LOG" <<'JS'
+const fs = require("fs");
+const path = require("path");
+const [lanePath, target, root, log] = process.argv.slice(2);
+let owns = [];
+try {
+  owns = JSON.parse(fs.readFileSync(lanePath, "utf8")).owns || [];
+} catch (e) {
+  owns = [];
+}
+let resolved;
+try {
+  resolved = fs.realpathSync(path.isAbsolute(target) ? target : path.join(root, target));
+} catch (e) {
+  resolved = path.resolve(path.isAbsolute(target) ? target : path.join(root, target));
+}
+const rel = path.relative(root, resolved).split(path.sep).join("/");
+function matches(g) {
+  if (g.endsWith("/**")) return rel === g.slice(0, -3) || rel.startsWith(g.slice(0, -3));
+  return rel === g;
+}
+const ok = owns.some(matches);
+if (!ok) {
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  fs.appendFileSync(log, JSON.stringify({ ts: new Date().toISOString().replace(/\.\d+Z$/, "Z"), path: rel, owns }) + "\n");
+}
+JS
+fi
+
+emit_allow
