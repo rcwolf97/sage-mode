@@ -19,7 +19,7 @@
 //     re-write it from source and resume tracking it.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { VERSION } from "../util.js";
 
 export interface ManifestEntry {
@@ -59,6 +59,24 @@ function manifestPath(root: string): string {
 
 function fileSha256(absPath: string): string {
   return createHash("sha256").update(readFileSync(absPath)).digest("hex");
+}
+
+// Resolves a manifest-recorded path against the project root and refuses to
+// hand back anything outside it. Every legitimate entry is written by
+// installFile() from a relPath candidateFiles() built itself (never from
+// user input), so it can never contain `..` or an absolute path — but the
+// manifest on disk is just JSON a user (or a malicious/corrupt repo) can
+// hand-edit. A `../../etc/passwd`-style entry, or one that repeats an
+// absolute path, must never let classify(), installFile(), or
+// plannedRemovals() read, write, or delete something outside the project.
+// Returns null for any resolved path that isn't root itself or a descendant
+// of it; every caller treats null exactly like "we don't own this" — never
+// touch it, in either direction.
+function resolveInRoot(root: string, relPath: string): string | null {
+  const rootAbs = resolve(root);
+  const target = resolve(rootAbs, normalizeRel(relPath));
+  if (target !== rootAbs && !target.startsWith(rootAbs + sep)) return null;
+  return target;
 }
 
 export function readManifest(root: string): Manifest {
@@ -103,7 +121,11 @@ function upsertEntry(manifest: Manifest, relPath: string, sha256: string, writte
 export function classify(root: string, relPath: string, manifest: Manifest): Classification {
   const entry = findEntry(manifest, relPath);
   if (!entry) return "unowned";
-  const abs = join(root, normalizeRel(relPath));
+  const abs = resolveInRoot(root, relPath);
+  // An entry whose recorded path escapes the project root is never trusted
+  // enough to plan a removal or a refresh against — treat it the same as no
+  // entry at all (see resolveInRoot above).
+  if (!abs) return "unowned";
   if (!existsSync(abs)) return "missing";
   return fileSha256(abs) === entry.sha256 ? "owned-clean" : "owned-modified";
 }
@@ -122,7 +144,14 @@ function atomicWrite(destAbs: string, content: Buffer): void {
 
 export function installFile(root: string, relPath: string, sourceAbsPath: string, manifest: Manifest): InstallResult {
   const norm = normalizeRel(relPath);
-  const abs = join(root, norm);
+  const abs = resolveInRoot(root, norm);
+  if (!abs) {
+    // relPath escapes the project root. candidateFiles() never produces one
+    // of these, but installFile is an exported entry point on its own — this
+    // is the last line of defense against ever writing outside the project,
+    // no matter what a future or malicious caller hands it.
+    return { path: norm, action: "preserved", reason: "unowned" };
+  }
   const cls = classify(root, norm, manifest);
 
   if (cls === "unowned") {

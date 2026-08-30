@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync, } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { setup, uninstall, checkHealth } from "../lib/setup/index.js";
-import { readManifest } from "../lib/manifest/index.js";
+import { classify, installFile, plannedRemovals, readManifest, writeManifest } from "../lib/manifest/index.js";
 function gitInit(dir) {
     spawnSync("git", ["init"], { cwd: dir });
     spawnSync("git", ["config", "user.email", "t@t.t"], { cwd: dir });
@@ -210,4 +210,280 @@ test("checkHealth flags a customized file as a preserved gap without treating it
     assert.equal(report.manifest.ownedModified, 1);
     assert.ok(report.gaps.some((g) => g.includes("customized")));
     assert.equal(report.ok, true);
+});
+// --- Adversarial coverage -------------------------------------------------
+test("a manifest entry with a ../ path can never make uninstall delete a file outside the project root", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    // A file that lives outside the project root entirely (a sibling of it),
+    // standing in for something the user cares about. Its content is *known*
+    // to the "attacker" so the recorded sha256 in the crafted manifest can
+    // match it exactly — the worst case, where classify() cannot fall back on
+    // a hash mismatch to save it.
+    const victim = join(dir, "..", "victim.txt");
+    const victimContent = "the user's own file, outside the sage project entirely\n";
+    writeFileSync(victim, victimContent);
+    const victimHash = createHash("sha256").update(victimContent).digest("hex");
+    assert.ok(existsSync(victim));
+    mkdirSync(join(dir, ".sage"), { recursive: true });
+    writeManifest(dir, {
+        version: 1,
+        installedAt: new Date().toISOString(),
+        sageVersion: "1.0.0",
+        entries: [{ path: "../victim.txt", sha256: victimHash, writtenAt: new Date().toISOString() }],
+    });
+    // A malicious/corrupt manifest entry escaping the project root must never
+    // be eligible for removal, no matter what classify() would otherwise say
+    // about its hash.
+    const manifest = readManifest(dir);
+    assert.deepEqual(plannedRemovals(dir, manifest), []);
+    assert.equal(classify(dir, "../victim.txt", manifest), "unowned");
+    const result = uninstall({ project: dir });
+    assert.ok(existsSync(victim), "file outside the project root must survive uninstall");
+    assert.equal(readFileSync(victim, "utf8"), victimContent);
+    assert.deepEqual(result.removed, []);
+    rmSync(victim, { force: true });
+});
+test("installFile refuses to write outside the project root even if handed an escaping relPath directly", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const targetOutside = join(dir, "..", "should-not-exist.txt");
+    rmSync(targetOutside, { force: true });
+    const manifest = readManifest(dir);
+    const res = installFile(dir, "../should-not-exist.txt", join(home, "agents", "architect.md"), manifest);
+    assert.equal(res.action, "preserved");
+    assert.ok(!existsSync(targetOutside), "installFile must never create a file outside the project root");
+    rmSync(targetOutside, { force: true });
+});
+test("classify() and plannedRemovals() also refuse an absolute manifest path outside the root", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const outside = mkdtempSync(join(tmpdir(), "sage-outside-"));
+    const target = join(outside, "abs-target.txt");
+    writeFileSync(target, "unrelated file on the machine\n");
+    const hash = createHash("sha256").update("unrelated file on the machine\n").digest("hex");
+    mkdirSync(join(dir, ".sage"), { recursive: true });
+    writeManifest(dir, {
+        version: 1,
+        installedAt: new Date().toISOString(),
+        sageVersion: "1.0.0",
+        entries: [{ path: target, sha256: hash, writtenAt: new Date().toISOString() }],
+    });
+    const manifest = readManifest(dir);
+    assert.equal(classify(dir, target, manifest), "unowned");
+    assert.deepEqual(plannedRemovals(dir, manifest), []);
+    uninstall({ project: dir });
+    assert.ok(existsSync(target), "absolute-path manifest entry must not cause deletion outside the root");
+});
+test("a symlink standing in for an owned agent card, pointed at a personal fork with different content, is preserved not clobbered", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    const fork = join(dir, "..", "my-fork-architect.md");
+    const forkContent = "the user's personal fork, symlinked into place\n";
+    writeFileSync(fork, forkContent);
+    const linked = join(dir, ".cursor", "agents", "architect.md");
+    rmSync(linked);
+    symlinkSync(fork, linked);
+    const r2 = withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    assert.ok(r2.files.preserved.includes(".cursor/agents/architect.md"));
+    assert.ok(lstatSync(linked).isSymbolicLink(), "the symlink itself must survive, not be replaced");
+    assert.equal(readlinkSync(linked), fork);
+    assert.equal(readFileSync(linked, "utf8"), forkContent, "the fork's content must be untouched");
+    rmSync(fork, { force: true });
+});
+test("uninstall never follows a symlinked owned-clean card into its target — only the link itself is removed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    // Simulate an owned-clean file that happens to be a symlink to a file with
+    // byte-identical content to what sage wrote (so classify() calls it
+    // owned-clean and marks it for removal).
+    const linkedPath = join(dir, ".cursor", "agents", "architect.md");
+    const originalContent = readFileSync(linkedPath, "utf8");
+    const decoy = join(dir, "..", "decoy-architect.md");
+    writeFileSync(decoy, originalContent);
+    rmSync(linkedPath);
+    symlinkSync(decoy, linkedPath);
+    uninstall({ project: dir });
+    assert.ok(!existsSync(linkedPath), "the symlink entry itself should be gone");
+    assert.ok(existsSync(decoy), "the symlink's target must never be deleted");
+    assert.equal(readFileSync(decoy, "utf8"), originalContent);
+    rmSync(decoy, { force: true });
+});
+test("a corrupt install-manifest.json makes every tracked file look unowned and untouched, never crashes setup", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    writeFileSync(join(dir, ".sage", "install-manifest.json"), "{ not valid json at all ][");
+    const r2 = withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    // Every path is now "unowned" (present, no manifest entry) and must be
+    // preserved untouched, never overwritten.
+    for (const rel of [...agentsRelPaths(), ...ASSET_REL_PATHS]) {
+        assert.ok(r2.files.preserved.includes(rel), `expected ${rel} preserved after a corrupt manifest`);
+    }
+    assert.equal(readFileSync(join(dir, ".cursor", "agents", "architect.md"), "utf8"), "original content for architect.md\n");
+});
+test("an empty install-manifest.json (falsy but valid-ish content) is treated the same safe way", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    writeFileSync(join(dir, ".sage", "install-manifest.json"), "");
+    assert.doesNotThrow(() => withHome(userHome, () => setup({ project: dir, sageHome: home })));
+});
+test("an interrupted setup (throw partway through the install loop) leaves the manifest exactly as it was before the run", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome(["architect.md", "implementer-backend.md", "reviewer.md"]);
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    const manifestBefore = readFileSync(join(dir, ".sage", "install-manifest.json"), "utf8");
+    // Change the source so this run will actually try to refresh an
+    // already-tracked file (not just no-op re-verify it), then replace that
+    // file's destination with a non-empty directory. classify()'s
+    // fileSha256() call reads it as a file and throws EISDIR — a failure mode
+    // that doesn't depend on process uid the way chmod-based permission
+    // failures do (this test process runs as root, which bypasses permission
+    // bits entirely), so it reliably proves the point on any uid.
+    writeFileSync(join(home, "agents", "reviewer.md"), "a newer version of the shipped card\n");
+    const blockedAbs = join(dir, ".cursor", "agents", "reviewer.md");
+    rmSync(blockedAbs);
+    mkdirSync(blockedAbs);
+    writeFileSync(join(blockedAbs, "not-empty.txt"), "occupies the destination\n");
+    let threw = false;
+    try {
+        withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    }
+    catch {
+        threw = true;
+    }
+    finally {
+        rmSync(blockedAbs, { recursive: true, force: true });
+    }
+    assert.ok(threw, "expected the interrupted setup to throw rather than silently succeed");
+    const manifestAfter = readFileSync(join(dir, ".sage", "install-manifest.json"), "utf8");
+    assert.equal(manifestAfter, manifestBefore, "manifest on disk must be exactly the pre-run version, not partially updated");
+    const manifest = readManifest(dir);
+    for (const rel of [...agentsRelPaths(), ...ASSET_REL_PATHS]) {
+        assert.ok(manifest.entries.some((e) => e.path === rel), `expected ${rel} still tracked from the successful prior run`);
+    }
+    // None of the previously-installed files this run never touched were
+    // corrupted or lost (reviewer.md is excluded: this test deliberately
+    // replaced it with a directory as the trigger for the mid-loop throw).
+    for (const rel of agentsRelPaths().filter((r) => !r.endsWith("reviewer.md"))) {
+        assert.ok(existsSync(join(dir, rel)));
+    }
+});
+test("setting up into a project whose .cursor/agents path is blocked by a plain file throws instead of silently reporting success", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    // A plain file sitting where sage needs a directory — mkdirSync(...,
+    // {recursive:true}) cannot create a directory through a file, regardless
+    // of who owns the process, so this is a permission-independent way to
+    // prove a write failure surfaces rather than being swallowed.
+    mkdirSync(join(dir, ".cursor"), { recursive: true });
+    writeFileSync(join(dir, ".cursor", "agents"), "not a directory\n");
+    let threw = false;
+    try {
+        withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    }
+    catch {
+        threw = true;
+    }
+    assert.ok(threw, "expected setup() to surface the write failure rather than swallow it");
+    assert.ok(!existsSync(join(dir, ".sage", "install-manifest.json")), "no manifest should be written for a failed run");
+});
+test("checkHealth is fully read-only on a repo where nothing has been set up yet, including ~/.sage", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const userHome = isolatedUserHome();
+    const beforeProject = snapshotTree(dir);
+    const beforeUser = snapshotTree(userHome);
+    const projectEntriesBefore = existsSync(dir) ? readdirSync(dir) : [];
+    const userEntriesBefore = existsSync(userHome) ? readdirSync(userHome) : [];
+    withHome(userHome, () => checkHealth({ project: dir }));
+    const afterProject = snapshotTree(dir);
+    const afterUser = snapshotTree(userHome);
+    assert.deepEqual(beforeProject, afterProject);
+    assert.deepEqual(beforeUser, afterUser);
+    assert.deepEqual(existsSync(dir) ? readdirSync(dir) : [], projectEntriesBefore);
+    assert.deepEqual(existsSync(userHome) ? readdirSync(userHome) : [], userEntriesBefore);
+    assert.ok(!existsSync(join(userHome, ".sage")), "checkHealth must not create ~/.sage as a side effect");
+});
+test("interpreter detection actually executes the binary: present-but-broken is reported present:true, runs:false", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const userHome = isolatedUserHome();
+    const fakeBinDir = mkdtempSync(join(tmpdir(), "sage-fakebin-"));
+    const fakeNode = join(fakeBinDir, "node");
+    writeFileSync(fakeNode, "#!/bin/sh\nexit 1\n");
+    chmodSync(fakeNode, 0o755);
+    const prevPath = process.env.PATH;
+    process.env.PATH = `${fakeBinDir}:${prevPath}`;
+    let report;
+    try {
+        report = withHome(userHome, () => checkHealth({ project: dir }));
+    }
+    finally {
+        process.env.PATH = prevPath;
+    }
+    const node = report.interpreters.find((i) => i.name === "node");
+    assert.ok(node);
+    assert.equal(node.present, true);
+    assert.equal(node.runs, false);
+    assert.equal(node.version, undefined);
+    assert.equal(report.ok, false);
+    assert.ok(report.gaps.some((g) => g.includes("node") && g.includes("broken")));
+});
+test("--purge-user-config removes only this project from trustedRoots, never the rest of ~/.sage/config.json", () => {
+    const dirA = mkdtempSync(join(tmpdir(), "sage-proj-a-"));
+    const dirB = mkdtempSync(join(tmpdir(), "sage-proj-b-"));
+    gitInit(dirA);
+    gitInit(dirB);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dirA, sageHome: home }));
+    withHome(userHome, () => setup({ project: dirB, sageHome: home }));
+    const cfgPath = join(userHome, ".sage", "config.json");
+    const cfgBefore = JSON.parse(readFileSync(cfgPath, "utf8"));
+    assert.ok(cfgBefore.trustedRoots.includes(dirA));
+    assert.ok(cfgBefore.trustedRoots.includes(dirB));
+    withHome(userHome, () => uninstall({ project: dirA, purgeUserConfig: true }));
+    const cfgAfter = JSON.parse(readFileSync(cfgPath, "utf8"));
+    assert.ok(!cfgAfter.trustedRoots.includes(dirA), "the uninstalled project must be removed from trustedRoots");
+    assert.ok(cfgAfter.trustedRoots.includes(dirB), "other projects' trustedRoots entries must survive");
+    assert.equal(cfgAfter.sageHome, cfgBefore.sageHome, "unrelated config keys must be preserved, not dropped");
+    assert.equal(cfgAfter.version, cfgBefore.version);
+});
+test("a stale manifest hash (as if a prior setup crashed between writing the file and writing the manifest) is treated as owned-modified, never silently rewritten", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    // Simulate: the file on disk already has the *new* source content (as if
+    // atomicWrite succeeded) but the manifest was never updated to match (as
+    // if the process died right before writeManifest ran).
+    const rel = ".cursor/agents/architect.md";
+    const abs = join(dir, ".cursor", "agents", "architect.md");
+    writeFileSync(abs, "content that landed on disk but was never recorded in the manifest\n");
+    const manifest = readManifest(dir);
+    assert.equal(classify(dir, rel, manifest), "owned-modified");
+    // The safe direction: never silently overwrite something that looks
+    // user-modified, even though in this scenario it's actually sage's own
+    // (unrecorded) write.
+    const r2 = withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    assert.ok(r2.files.preserved.includes(rel));
+    assert.equal(readFileSync(abs, "utf8"), "content that landed on disk but was never recorded in the manifest\n");
 });

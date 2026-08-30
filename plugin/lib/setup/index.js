@@ -137,9 +137,13 @@ export function uninstall(opts) {
             removed.push(entry.path);
             continue;
         }
-        // Not in plannedRemovals: classify() said owned-modified (never unowned —
-        // unowned by definition has no manifest entry, so it can't appear here).
-        preserved.push({ path: entry.path, reason: "modified" });
+        // Not in plannedRemovals: classify() said owned-modified (the ordinary
+        // "user edited this" case), or — for an entry whose recorded path
+        // escapes the project root, which a hand-edited or malicious manifest
+        // can contain — "unowned" (see resolveInRoot in lib/manifest/index.ts).
+        // Either way it is kept, never deleted; only the reported reason differs.
+        const cls = classify(root, entry.path, manifest);
+        preserved.push({ path: entry.path, reason: cls === "unowned" ? "unowned" : "modified" });
         remaining.push(entry);
     }
     writeManifest(root, { ...manifest, entries: remaining });
