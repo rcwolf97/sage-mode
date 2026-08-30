@@ -434,6 +434,36 @@ test("an empty install-manifest.json (falsy but valid-ish content) is treated th
   assert.doesNotThrow(() => withHome(userHome, () => setup({ project: dir, sageHome: home })));
 });
 
+test("a manifest entry missing its path (or sha256) field is dropped, never crashes uninstall/checkHealth/setup", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+  gitInit(dir);
+  const home = makeSageHome();
+  const userHome = isolatedUserHome();
+
+  mkdirSync(join(dir, ".sage"), { recursive: true });
+  writeFileSync(
+    join(dir, ".sage", "install-manifest.json"),
+    JSON.stringify({
+      version: 1,
+      installedAt: new Date().toISOString(),
+      sageVersion: "1.0.0",
+      entries: [
+        { sha256: "deadbeef", writtenAt: new Date().toISOString() }, // missing path
+        { path: ".cursor/agents/architect.md", writtenAt: new Date().toISOString() }, // missing sha256
+        null,
+        "not even an object",
+      ],
+    }),
+  );
+
+  const manifest = readManifest(dir);
+  assert.deepEqual(manifest.entries, []);
+
+  assert.doesNotThrow(() => withHome(userHome, () => uninstall({ project: dir })));
+  assert.doesNotThrow(() => withHome(userHome, () => checkHealth({ project: dir })));
+  assert.doesNotThrow(() => withHome(userHome, () => setup({ project: dir, sageHome: home })));
+});
+
 test("an interrupted setup (throw partway through the install loop) leaves the manifest exactly as it was before the run", () => {
   const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
   gitInit(dir);

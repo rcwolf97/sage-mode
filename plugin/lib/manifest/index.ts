@@ -84,11 +84,24 @@ export function readManifest(root: string): Manifest {
   if (existsSync(p)) {
     try {
       const parsed = JSON.parse(readFileSync(p, "utf8")) as Partial<Manifest>;
+      // A malformed *entry* (missing/non-string path or sha256 — a
+      // hand-edit gone wrong, not just unparseable JSON) must not crash
+      // classify()/plannedRemovals() downstream: normalizeRel() assumes a
+      // string. Drop anything that doesn't look like a real entry rather
+      // than let it blow up uninstall/checkHealth/setup with a raw
+      // TypeError — the same safe fallback as a fully corrupt manifest,
+      // just scoped to the one bad entry instead of the whole file.
+      const entries = Array.isArray(parsed.entries)
+        ? parsed.entries.filter(
+            (e): e is ManifestEntry =>
+              !!e && typeof e === "object" && typeof e.path === "string" && typeof e.sha256 === "string",
+          )
+        : [];
       return {
         version: 1,
         installedAt: typeof parsed.installedAt === "string" ? parsed.installedAt : new Date().toISOString(),
         sageVersion: typeof parsed.sageVersion === "string" ? parsed.sageVersion : VERSION,
-        entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+        entries,
       };
     } catch {
       // Corrupt manifest: fall through to a fresh one rather than throwing —
