@@ -104,9 +104,31 @@ export function assertTrusted(cwd?: string): void {
   }
 }
 
+// Lane B needs exactly one capability: `claude -p`. Gating on `claude --version`
+// exiting 0 was wrong, and wrong in the dangerous direction — it silently
+// DISABLES Lane B on a host where Lane B works. Found on a real machine whose
+// `claude` is a restricted wrapper that answers every other invocation with
+// "only `claude -p \"<prompt>\"` is supported in this environment" and a
+// non-zero status, while `claude -p` itself works perfectly. A capability probe
+// must test the capability actually used, not a version banner that happens to
+// be adjacent to it.
+//
+// So: presence on PATH is the gate. If the binary is there but genuinely
+// broken, the real `-p` call below fails and returns its own error with the
+// child's stderr attached — a loud, accurate failure at the point of use, which
+// is strictly better than a quiet pre-emptive downgrade to Lane A that the user
+// never sees and cannot debug.
 function claudeAvailable(): boolean {
+  const which = spawnSync("command", ["-v", "claude"], {
+    encoding: "utf8",
+    timeout: 2500,
+    shell: true,
+  });
+  if (which.status === 0 && (which.stdout || "").trim()) return true;
+  // Fall back to a version probe only when `command -v` itself is unavailable;
+  // a zero exit here is sufficient, a non-zero one is not disqualifying.
   const r = spawnSync("claude", ["--version"], { encoding: "utf8", timeout: 2500 });
-  return r.status === 0;
+  return r.status === 0 || !r.error;
 }
 
 // Lane B's entire premise is flat-rate subscription billing via the `claude` CLI. A

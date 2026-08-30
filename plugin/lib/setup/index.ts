@@ -263,6 +263,10 @@ export interface InterpreterStatus {
   present: boolean;
   runs: boolean;
   version?: string;
+  /** true when the tool launched but its no-op probe returned non-zero —
+   *  installed and executable, but this probe cannot confirm the capability.
+   *  Reported as a gap, never as a broken install. */
+  probeInconclusive?: boolean;
 }
 
 export interface VerifyCheckStatus {
@@ -301,11 +305,27 @@ function locate(name: string): boolean {
 // PATH. A binary that resolves via `command -v` but fails to run (wrong
 // architecture, broken shim, missing shared library, no exec permission) is a
 // real and confusing failure mode that presence-only checks miss entirely.
-function probeInterpreter(name: string, noopArgs: string[]): InterpreterStatus {
+// `optionalProbe` marks a tool whose no-op invocation is NOT a reliable
+// liveness signal. `claude` is the motivating case: some installs are
+// restricted wrappers that reject `--version` with a non-zero status while
+// `claude -p` — the only thing sage-mode actually calls — works fine. For
+// those, failing to answer the probe means "could not determine", not "broken",
+// and must never be reported as a broken install.
+function probeInterpreter(
+  name: string,
+  noopArgs: string[],
+  opts?: { optionalProbe?: boolean },
+): InterpreterStatus {
   const present = locate(name);
-  if (!present) return { name, present: false, runs: false };
+  if (!present) return { name, present: false, runs: false, probeInconclusive: false };
   const exec = spawnSync(name, noopArgs, { encoding: "utf8", timeout: 5000 });
-  const runs = !exec.error && exec.status === 0;
+  const spawned = !exec.error;
+  const runs = spawned && exec.status === 0;
+  if (present && spawned && !runs && opts?.optionalProbe) {
+    // It launched and answered — it is installed and executable. The non-zero
+    // status tells us about this probe, not about the tool.
+    return { name, present, runs: true, probeInconclusive: true };
+  }
   let version: string | undefined;
   if (runs) {
     const v = spawnSync(name, ["--version"], { encoding: "utf8", timeout: 5000 });
@@ -313,7 +333,7 @@ function probeInterpreter(name: string, noopArgs: string[]): InterpreterStatus {
       version = ((v.stdout || v.stderr || "").trim().split(/\r?\n/)[0]) || undefined;
     }
   }
-  return { name, present, runs, version };
+  return { name, present, runs, version, probeInconclusive: false };
 }
 
 // Read-only capability report: resolves environment, project, and manifest
@@ -370,13 +390,23 @@ export function checkHealth(opts?: { project?: string }): HealthReport {
     probeInterpreter("python3", ["-c", ""]),
     probeInterpreter("node", ["-e", ""]),
     probeInterpreter("git", ["--version"]),
-    probeInterpreter("claude", ["--version"]),
+    probeInterpreter("claude", ["--version"], { optionalProbe: true }),
   ];
   for (const i of interpreters) {
     if (!i.present) {
       // Absent is always a gap, `claude` included — Lane B is optional and
       // the code already documents a Lane A fallback for it.
       note(gaps, problems, `${i.name} not found on PATH (optional — only needed for workflows that use it)`, "gap");
+    } else if (i.probeInconclusive) {
+      // Installed and executable, probe just wasn't conclusive. A gap at most —
+      // reporting this as broken is what made `setup --check` fail on a healthy
+      // machine whose `claude` is a restricted `-p`-only wrapper.
+      note(
+        gaps,
+        problems,
+        `${i.name} is installed but did not answer a version probe — assuming usable; if a lane that needs it fails, check it by hand`,
+        "gap",
+      );
     } else if (!i.runs) {
       // Present but non-functional is the confusing failure mode worth
       // failing loudly on: a broken install or wrong architecture, not an
