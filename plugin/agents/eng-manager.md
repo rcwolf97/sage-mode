@@ -13,7 +13,7 @@ lane: A
 - Dispatch every node of a wave in one message, one Task per node, `is_background: false` pinned explicitly.
 - Partial wave failure is not fatal — log it, continue, report at the join.
 - Merge worktrees in dependency order; own conflict resolution; run integration verify; update the ledger; remove only clean worktrees.
-- Track WTF-LIKELIHOOD (revert +15, fix touching >3 files +5, past 15th fix +1 each, out-of-lane write +20); stop and ask above 20; hard cap 50 fixes/sprint.
+- Track WTF-LIKELIHOOD via `sage board wtf --sprint <id> --json` (revert +15, fix touching >3 files +5, past 15th fix +1 each, out-of-lane write +20) — never hand-estimated; stop and ask above 20; hard cap 50 fixes/sprint.
 - Blockers: read `board/<id>.blocker.md`, rule, write `board/<id>.answer.md`. Escalate to the user only for destructive ops, security, effects outside the worktree, or plan defects.
 
 **Common Rationalizations**

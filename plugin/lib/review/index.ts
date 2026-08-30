@@ -172,6 +172,24 @@ export interface SpecialistStats {
   [name: string]: { dispatches: number; findings: number };
 }
 
+// Single source of truth for the roster's 9 specialist names — select()'s
+// opts.all branch and the mechanical checklist-file test (test/review.test.ts)
+// both read from this instead of each keeping their own copy, which is what
+// let the two silently disagree before: a complex-workload review found
+// skills/sage-review/SKILL.md's "pass the checklist path" instruction had no
+// matching file for any of these names anywhere in the shipped plugin.
+export const SPECIALIST_ROSTER = [
+  "correctness",
+  "testing",
+  "maintainability",
+  "security",
+  "data-migration",
+  "api-contract",
+  "performance",
+  "design",
+  "prompt-eval",
+] as const;
+
 export function select(opts: {
   scope: Scope;
   stats?: SpecialistStats;
@@ -196,18 +214,7 @@ export function select(opts: {
   if (s.SCOPE_FRONTEND && opts.designRequired) add("design");
   if (s.SCOPE_AI) add("prompt-eval");
   if (opts.all) {
-    for (const n of [
-      "correctness",
-      "testing",
-      "maintainability",
-      "security",
-      "data-migration",
-      "api-contract",
-      "performance",
-      "design",
-      "prompt-eval",
-    ])
-      add(n);
+    for (const n of SPECIALIST_ROSTER) add(n);
   }
   for (const f of opts.force || []) add(f);
 

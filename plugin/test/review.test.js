@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
-import { gate, dedup, checkRecommendation } from "../lib/review/index.js";
+import { gate, dedup, checkRecommendation, SPECIALIST_ROSTER } from "../lib/review/index.js";
 test("review gate caps confidence at 5 when evidence is empty even if input claims 9", () => {
     const out = gate([
         {
@@ -124,4 +126,19 @@ test("checkRecommendation fails when the section exists but is empty", () => {
     const out = checkRecommendation(md);
     assert.equal(out.ok, false);
     assert.ok(out.issues.some((i) => i.includes("empty")));
+});
+// sage-review/SKILL.md step 3 tells the dispatcher to pass a checklist
+// *path* — skills/sage-review/references/checklists/<specialist>.md — for
+// every name `select()` can return. SPECIALIST_ROSTER is the single source
+// of truth for those names (select()'s opts.all branch iterates it directly,
+// see lib/review/index.ts). If a name is ever added to the roster without a
+// matching checklist file landing alongside it, the dispatch instruction
+// silently breaks — the agent would be told to pass a path that 404s. This
+// test makes that drift a build-time failure instead of a runtime surprise
+// discovered mid-review.
+test("every specialist in SPECIALIST_ROSTER has a checklist file sage-review/SKILL.md can actually dispatch", () => {
+    for (const name of SPECIALIST_ROSTER) {
+        const path = join(import.meta.dirname, "..", "skills", "sage-review", "references", "checklists", `${name}.md`);
+        assert.ok(existsSync(path), `missing checklist file for specialist "${name}": ${path}`);
+    }
 });

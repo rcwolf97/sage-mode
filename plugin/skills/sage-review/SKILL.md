@@ -51,11 +51,13 @@ scope`), the node's acceptance criteria. **Writes:** `findings.jsonl`,
 
 3. **Dispatch the wave, in one message.** One Task call per selected
    specialist, all in the same assistant turn, so Cursor parallelizes them.
-   Pass the base ref and the checklist **path** — never its contents; the
-   specialist re-derives its own diff via `git merge-base <base> HEAD` then
-   `git diff`, which is a cheaper prompt and works because each subagent has
-   repo access. Set `is_background: false` explicitly on every dispatch —
-   don't rely on the default.
+   Pass the base ref and the checklist **path** — `skills/sage-review/
+   references/checklists/<specialist>.md`, one file per roster name, e.g.
+   `references/checklists/security.md` for the `security` dispatch — never
+   its contents; the specialist re-derives its own diff via `git merge-base
+   <base> HEAD` then `git diff`, which is a cheaper prompt and works because
+   each subagent has repo access. Set `is_background: false` explicitly on
+   every dispatch — don't rely on the default.
 
 4. **Withhold the claim.** The reviewer receives ARTIFACT (the diff) and
    CONTRACT (the node's acceptance criteria) only — **never** the
@@ -126,11 +128,13 @@ scope`), the node's acceptance criteria. **Writes:** `findings.jsonl`,
     Pick the single highest-confidence finding that survived gate + dedup
     (ties broken toward `CRITICAL` severity) and write the recommendation
     around it, citing its `path:line` directly. Before writing, run
-    `checkRecommendation` (`lib/review/index.ts`) against the rendered
-    markdown — it verifies the section exists, is non-empty, cites a real
-    `path:line`, and isn't pure generic hedging (see
-    `GENERIC_RECOMMENDATION_PHRASES` in that file) with nothing specific
-    behind it. A failing check means write it again, not ship it anyway.
+    `sage review recommendation --file <rendered-review.md> --json` — it
+    verifies the section exists, is non-empty, cites a real `path:line`, and
+    isn't pure generic hedging (see `GENERIC_RECOMMENDATION_PHRASES` in
+    `lib/review/index.ts`) with nothing specific behind it. That command is
+    the only path to `checkRecommendation`; there is no other way to run it.
+    A non-zero exit or `"ok": false` means write it again, not ship it
+    anyway.
 
 ## Common Rationalizations
 

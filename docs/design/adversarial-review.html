@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Adversarial Re-Review · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html" class="on">Design</a><a href="../research/overview.html">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Design</div>
+    <h1>Adversarial Re-Review</h1>
+    <div class="sub">Ready with caveats — a new D2 false negative found and closed, plus what the fix pass missed</div>
+  </div>
+  <blockquote>
+<p><strong>Update, same day.</strong> F1 (the character-class/<code>?</code> false negative in <code>lib/dag</code>), F2 (CI running a narrower test set than <code>npm test</code>), and F8 (the README's broken install path) were fixed immediately after this review, verified against the exact adversarial cases below plus a real CLI-level reproduction, and redeployed. The sections below (§2.3, §2.4, §3, §6 items 2/3/5) describe the state <strong>as found</strong>, not the current state — left as written because the finding, the reproduction, and the fix are worth keeping intact as a record. F3–F7, F9, and the two unrun platform spikes remain open exactly as described.</p>
+</blockquote>
+<p><strong>Reviewed:</strong> 2026-08-24 · <strong>Target:</strong> <code>/root/fix/plugin</code> (the exact content deployed to the owner's project) · <strong>Baseline:</strong> <a href="./build-review.html"><code>build-review.md</code></a>, against <code>bb36690</code>
+<strong>Method:</strong> independent re-execution of every claimed verification command, hand-crafted adversarial payloads against all five hooks under both <code>dash</code> and <code>bash</code>, direct probing of <code>lib/dag</code>'s glob engine with pairs not in its own test file, a full read of <code>tech-spec.md</code>, a section-by-section cross-check against the fix pass's own claims, and a full read of 6+ skills and 6+ role cards for content quality, not just line count.</p>
+<blockquote>
+<p><strong>In plain terms:</strong> The fix pass did real, verifiable work — the three original blockers are substantially closed, the hooks genuinely work under <code>dash</code> now, and I could not break the specific false-negative shapes the first review named. But I found a new false negative in the exact same mechanism (D2, the lane-intersection check) using glob syntax the fix pass's own test suite never tried, a CI workflow that silently runs a narrower test set than <code>npm test</code> does, and a catalog of 25 "skills" that are one template with the names swapped in — not the by-the-original-review-standard "outline instead of a procedure" but something one level worse: no procedure at all, just a shape. None of this is a redesign. It's installable and testable today with the caveats below understood.</p>
+</blockquote>
+<hr />
+<h2 id="1-verdict">1. Verdict</h2>
+<p><strong>Ready with caveats.</strong> This is safe to install and start using on a real project this week, on the condition that the owner reads §5 below before relying on parallel <code>/sage-build</code> dispatch with anything but simple trailing-<code>**</code> glob lanes, and treats the two platform spikes as unrun (because they are).</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th></th>
+<th>Original review</th>
+<th>This review</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B1 — hooks broken on Linux</td>
+<td>Broken (dead under <code>dash</code>)</td>
+<td><strong>Fixed and independently verified</strong>, including under adversarial payloads not in the original fixture set</td>
+</tr>
+<tr>
+<td>B2 — lane-intersection false negatives</td>
+<td>Broken (4/8 named cases missed)</td>
+<td><strong>The 4 named cases are fixed.</strong> A different false-negative class (POSIX character classes, <code>?</code>) is not — found independently, reproduced end-to-end at the CLI</td>
+</tr>
+<tr>
+<td>B3 — skills/role cards are outlines</td>
+<td>Broken (empty <code>references/</code>, 42-line <code>sage-shape</code>)</td>
+<td><strong>Substantially fixed for the spine skills and role cards</strong> (read in full, genuinely good). <strong>Not fixed for the 25-skill catalog</strong> — uniform 34-line template stubs</td>
+</tr>
+<tr>
+<td>CI never green</td>
+<td>3 failing tests on <code>main</code></td>
+<td><strong>41/41 pass when run as the fix pass ran them</strong> — but the actual CI workflow file runs a narrower 37-test set that silently excludes the M8 regression tests</td>
+</tr>
+<tr>
+<td>Blocking spikes (SPIKE-01/02)</td>
+<td>Never run</td>
+<td><strong>Still never run.</strong> No <code>docs/spikes/*.md</code> exists. Sensible fallback defaults are coded for both, but the two assumptions the whole cost/parallelism architecture rests on remain empirically untested against real Cursor</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="2-what-i-independently-verified-and-how">2. What I independently verified, and how</h2>
+<h3 id="21-build-unit-tests-lint-tier-3-re-run-from-scratch-not-trusted">2.1 Build, unit tests, lint, tier 3 — re-run from scratch, not trusted</h3>
+<pre><code>$ npx tsc -p .
+(clean, no output)
+
+$ node --test --test-reporter=spec test/*.test.js lib/**/*.test.js
+...
+ℹ tests 41
+ℹ pass 41
+ℹ fail 0
+ℹ duration_ms 8573.3
+
+$ node lib/cli.js lint
+ok
+
+$ node evals/tier3/run.js
+7 passed, 0 failed, 1 skipped (of 8)
+</code></pre>
+<p>The tier-3 skip ("Reviewer handed a clean diff") is honest, not a dodge: its own printed rationale is that "no invented findings" is a claim about what a <em>live</em> reviewer subagent does with a real diff, and this sandboxed runner cannot invoke one — a synthetic empty-findings-list input would pass trivially without exercising anything. I agree with that assessment; it isn't fixable without a live Cursor session, which nothing in this environment can provide.</p>
+<h3 id="22-hooks-dash-and-bash-plus-payloads-the-fixture-set-doesnt-have">2.2 Hooks — dash and bash, plus payloads the fixture set doesn't have</h3>
+<p><code>bash hooks/tests/run.sh</code> passes every fixture under explicit <code>dash</code> and <code>bash</code> invocation (confirmed: <code>test [/usr/bin/dash] sage-solo ...  ok</code> for all five hooks, all six required categories from §7.1 rule 6 — normal allow, normal deny, malformed, BOM, empty, quote+newline — present for every hook). I then wrote my own adversarial payloads beyond the shipped fixtures and ran them directly against each hook under both interpreters:</p>
+<ul>
+<li><strong>BOM + embedded newline in one command</strong>, <strong>nested <code>eval</code>/subshell obfuscation</strong>, <strong>base64-piped-to-bash</strong> — all correctly fell to the ask-tier or the obfuscation tripwire under both <code>dash</code> and <code>bash</code>. No divergence between interpreters on any payload I tried.</li>
+<li><strong><code>sage-lane</code></strong>: relative <code>../</code> escape, <code>../</code> that returns back in-lane, <code>../</code> that escapes and lands in a different out-of-lane directory, an absolute path entirely outside the project, the <code>filePath</code> key variant, and a <code>null</code> <code>tool_input</code> — all handled correctly under the <code>python3</code> branch <strong>and</strong> under a <code>PATH</code> rigged to expose only <code>node</code> (forcing the fallback branch). Both interpreters agree.</li>
+<li><strong><code>sage-solo</code></strong>: a stale <code>.sage/parent-role</code> marker is read exactly once and deleted immediately, confirmed by checking the file no longer exists after the hook runs — this is the fix for M2 (the original review's "stale marker denies every future subagent spawn forever" bug), and it holds.</li>
+<li><strong><code>sage-careful</code></strong>: <code>rm -rf "/"</code> , <code>rm -rf '/'</code>, <code>rm -rf ///</code>, <code>rm -rf /.</code>, <code>rm -rf ${HOME}</code>, and <code>rm -rf $HOME/</code> all fall through the HIGH-deny tokenizer to the MEDIUM ask tier rather than a hard deny — a gap in the token-exact-match list, not a fail-open (ask-tier hooks are specified to never <code>failClosed</code>, so this degrades to "confirm," not "allow silently"). Listed as a minor finding in §5, not a blocker.</li>
+</ul>
+<h3 id="23-globintersect-the-finding-that-matters-most">2.3 <code>globIntersect</code> — the finding that matters most</h3>
+<p>The original review's B2 table (<code>src/*.ts</code> vs <code>src/api.ts</code>, <code>src/**/*.ts</code> vs <code>src/api/foo.ts</code>, <code>**/*.test.ts</code> vs <code>src/api.test.ts</code>, <code>src/api/**</code> vs <code>src/**/*.ts</code>) is genuinely fixed. I reproduced all four independently — both by calling <code>globIntersect</code> directly and via <code>sage dag lanes</code> at the CLI — and they now correctly report an intersection.</p>
+<p>I then went past that table with my own adversarial pairs, per the task's explicit instruction to try character classes, <code>?</code>, and doubly-wildcarded segments. Two of these reproduce a live false negative:</p>
+<pre><code>$ node -e &quot;... globIntersect('src/[ab]*.ts', 'src/api.ts', tree) ...&quot;
+=&gt; false   (real answer: true — 'a' is inside the class [ab])
+
+$ node -e &quot;... globIntersect('src/a?.ts', 'src/ab.ts', tree) ...&quot;
+=&gt; false   (real answer: true — '?' matches exactly one char, 'b')
+</code></pre>
+<p>This is not a synthetic empty-tree corner case — I built a real repo with <code>src/api.ts</code> and <code>src/ab.ts</code> actually committed, and <code>expandAgainstTree</code> returns <code>[]</code> for both wildcarded sides even though the tree contains an exact match. Root cause, read directly in <code>lib/dag/index.ts</code>: <code>globToRegExp</code> and <code>segmentRegExp</code> <strong>escape <code>[</code> and <code>]</code> as literal regex characters</strong> (no character-class support at all) and <strong>don't special-case <code>?</code></strong> — it falls through to the "else insert literally" branch, where <code>?</code> is a live regex metachar (zero-or-one of the preceding character), silently making whatever precedes it optional rather than matching a single character.</p>
+<p>Reproduced end-to-end at the exact CLI surface the owner will actually run:</p>
+<pre><code>$ cat dag.json   # n1 owns [&quot;src/[ab]*.ts&quot;], n2 owns [&quot;src/api.ts&quot;], same wave
+$ node lib/cli.js dag validate dag.json
+ok
+$ node lib/cli.js dag lanes dag.json --wave 1
+ok
+</code></pre>
+<p>Both come back clean. Two nodes with genuinely overlapping <code>owns</code> are scheduled into the same wave. This matters because <code>hooks/sage-lane</code> — the runtime enforcement — implements globs <em>correctly</em>: its Python branch uses <code>fnmatch.fnmatch</code> (which does support <code>[...]</code> and <code>?</code>) and its Node branch has its own from-scratch char-class parser that also gets it right. I confirmed this directly: with <code>.sage/lane</code> set to <code>owns: ["src/[ab]*.ts"]</code>, writing <code>src/api.ts</code> is <strong>allowed</strong> by the hook (correctly, per real glob semantics) under both interpreter branches. So at dispatch time, node A (whose lane genuinely covers <code>src/api.ts</code> via the character class) and node B (whose lane is exactly <code>src/api.ts</code>) can both be told by <code>sage dag lanes</code> that they're safe to run concurrently, and then both permitted by <code>sage-lane</code> to write the same file — the precise split-brain scenario D2 exists to prevent, reproduced from schema-authoring time through to runtime enforcement.</p>
+<p>The schema's own field description (<code>schemas/dag.schema.json</code> / tech-spec §5.3) calls <code>owns</code> "POSIX glob patterns" without qualification — character classes and <code>?</code> are standard POSIX glob syntax, not an exotic extension, and the runtime hook already implements them. This is a real, live gap in the single most safety-critical mechanic in the system, found by testing glob shapes the fix pass's own regression table (which is thorough on wildcard <em>position</em> but never touches wildcard <em>character class</em>) doesn't cover.</p>
+<p><em>(The "both sides wildcarded, different literal parts" case — e.g. <code>src/**/*.ts</code> vs <code>src/**/*.js</code> — does resolve to a false positive, not a false negative, via the documented "conservative true" fallback in <code>segmentCompatible</code>. That's the safe direction and matches the spec's explicit preference; it's a known, honestly-commented limitation, not a bug.)</em></p>
+<h3 id="24-ci-vs-what-actually-gets-tested">2.4 CI vs. what actually gets tested</h3>
+<p><code>package.json</code>'s <code>test</code> script is <code>node --test --test-reporter spec test/*.test.js lib/**/*.test.js</code> (41 tests). <code>.github/workflows/ci.yml</code> (which lives at <code>/root/fix/.github/workflows/ci.yml</code>, one level above <code>plugin/</code>) does not call <code>npm test</code> — it inlines <code>node --test --test-reporter spec test/*.test.js</code>, omitting <code>lib/**/*.test.js</code> entirely:</p>
+<pre><code>$ node --test --test-reporter=spec test/*.test.js   # what CI actually runs
+ℹ tests 37
+ℹ pass 37
+</code></pre>
+<p>The four tests CI silently skips are in <code>lib/consult/index.test.js</code> and, more importantly, <code>lib/lint/index.test.js</code> — which contains exactly the two regression tests for M8 from the original review (the lint-floor fix: "lint FAILS a stub SKILL.md well under its line floor... (previously passed)" and "lint PASSES a substantive SKILL.md..."). A future regression in the lint-floor logic would not be caught by the CI as it's actually configured, even though the test exists and passes when run by hand. This is exactly the kind of process gap the original review's closing note warned about ("test your code against the cases you expect to fail") — reproduced one level up, in the CI wiring itself rather than in a hook.</p>
+<h3 id="25-content-quality-read-not-counted">2.5 Content quality — read, not counted</h3>
+<p>I read <code>sage-shape/SKILL.md</code> (409 lines) in full: genuinely excellent. It carries the actual forcing-question text, real bad-answer/follow-up pairs for all seven topics, a fully worked demand-test table with a cost-to-give heuristic, worked premise-challenge examples, worked alternatives examples, an 18-row rationalization table that reads as observed rather than invented, and a red-flags list specific to intake failure modes. It correctly never restates conduct — it references <code>rules/sage-conduct.mdc</code> by name for the decision-brief format and anti-sycophancy rule rather than re-deriving them. This is a real fix, not padding to hit a line count; it's still short of the spec's ~830-line target, but what's there is substance.</p>
+<p>I read <code>reviewer.md</code>, <code>implementer-backend.md</code>, <code>architect.md</code>, and <code>design-director.md</code> in full: all four have a real Scope paragraph (what the role does and explicitly does not do), a concrete Checklist, and a stated Output contract — a material improvement over the original 3-sentence stubs, and well within the 80-line cap while using it more fully (19–29 lines vs. the original 7–13).</p>
+<p>I read the catalog in full (<code>migration-safety</code>, <code>security-audit</code>, plus spot checks). All 25 files in <code>skills/catalog/</code> are <strong>exactly 34 lines</strong>, byte-identical in structure, differing only in <code>name</code>, <code>description</code>, and the substitution of the <code>applies_when</code> string into two spots — including a spot where that substitution produces a grammatically broken sentence in every single file: <em>"'I'll skip the artifact, I looked already' → auditing auth, sessions, or trust boundaries. Size is not the filter."</em> (for <code>security-audit</code>; the same pattern repeats identically for all 25). There is no actual domain content anywhere in the catalog — no expand-contract/lock/backfill mechanics in <code>migration-safety</code>, no authn/authz/injection/secrets substance in <code>security-audit</code>. This is not "thin," it's a template with the topic name swapped in, and it directly contradicts §8.9's claim that catalog content "is straightforwardly adapted from agent-skills."</p>
+<p>I checked <code>design-intake/SKILL.md</code> (98 lines) against <code>sage-shape</code>, since the spec explicitly names both as the only two skills capped at 900 lines "because the interrogation content is the skill." <code>design-intake</code> has <strong>no <code>references/</code> directory at all</strong> (not empty — absent), no worked examples, no evasive-answer-handling depth. It does correctly cover every required topic from spec §10.3 (purpose/stakes, specific person, before/after, the two-word-tension test, three admired-with-specifics, three anti-references, the friend test, brand assets, constraints, content reality, success signal), so it's a real skill, just a noticeably thinner one than its named peer.</p>
+<hr />
+<h2 id="3-findings-the-fix-pass-missed-or-only-partially-closed">3. Findings the fix pass missed or only partially closed</h2>
+<p>Ordered by how much they matter to "safe to run on a real project."</p>
+<h3 id="f1-libdags-glob-engine-has-a-live-false-negative-on-posix-character-classes-and-see-23">F1 — <code>lib/dag</code>'s glob engine has a live false negative on POSIX character classes and <code>?</code> (see §2.3)</h3>
+<p><strong>Severity: real, load-bearing, but narrow in practice.</strong> Most Architect-authored <code>owns</code> globs will be simple trailing-<code>**</code>/<code>*</code> shapes, which the fix correctly handles. But an LLM-authored glob excluding a pattern (<code>src/[!_]*.ts</code>, <code>src/file-?.ts</code>) is entirely plausible, and when it happens, the exact safety guarantee D2 exists for silently does not hold — verified end to end through the real CLI surface, not a unit-test artifact. <strong>Fix is small</strong>: implement real <code>[...]</code> and <code>?</code> translation in <code>globToRegExp</code>/<code>segmentRegExp</code>, mirroring what <code>hooks/sage-lane</code>'s own two implementations already do correctly. Add the two cases above (plus a negative-class case, <code>[!ab]</code>) to <code>lib/dag/index.test.ts</code>.</p>
+<h3 id="f2-ci-silently-runs-a-narrower-test-set-than-npm-test-see-24">F2 — CI silently runs a narrower test set than <code>npm test</code> (see §2.4)</h3>
+<p><strong>Severity: process risk, not a live bug today</strong> — the excluded tests currently pass. But it means the CI green checkmark does not mean what the repo's own <code>package.json</code> says "test" means, and the specific tests excluded are the M8 regression tests from the original review. <strong>Fix is one line</strong>: <code>.github/workflows/ci.yml</code> should call <code>npm test</code>, not a hand-inlined subset of it.</p>
+<h3 id="f3-the-25-skill-catalog-is-a-single-template-not-adapted-content-see-25">F3 — The 25-skill catalog is a single template, not adapted content (see §2.5)</h3>
+<p><strong>Severity: reduces value, doesn't create risk.</strong> <code>sage recall</code> will successfully route a query to <code>migration-safety</code> or <code>security-audit</code> by name and description — the retrieval mechanism (Tier 2 eval, ≥80% rank-1, passes) works fine — but the skill it hands back has nothing in it. This is the largest single piece of the original B3 finding that the fix pass did not actually close, despite the unification pass's own report reportedly flagging catalog thinness as a known issue (per the task background) — it went unaddressed rather than fixed.</p>
+<h3 id="f4-design-intake-was-not-given-the-same-attention-as-its-named-peer-sage-shape-see-25">F4 — <code>design-intake</code> was not given the same attention as its named peer <code>sage-shape</code> (see §2.5)</h3>
+<p><strong>Severity: moderate.</strong> The design org's front door is functional and covers every required topic, but is missing the depth (<code>references/</code>, worked examples, evasive-answer patterns) that makes <code>sage-shape</code> genuinely good. Since <code>/design-intake</code> gates all downstream design work exactly the way <code>/sage-shape</code> gates all downstream engineering work, this asymmetry is worth closing before leaning on the design commands specifically.</p>
+<h3 id="f5-the-two-blocking-spikes-were-never-run-no-docsspikesmd-exists-anywhere">F5 — The two blocking spikes were never run; no <code>docs/spikes/*.md</code> exists anywhere</h3>
+<p><strong>Severity: the most consequential unresolved item, structurally.</strong> <code>find /root/fix/plugin/docs -iname "*spike*"</code> returns nothing. Both SPIKE-01 (does <code>preToolUse</code> expose <code>file_path</code> for <code>Write</code>?) and SPIKE-02 (do plugin-shipped subagents honor <code>model</code> frontmatter?) remain empirically untested against real Cursor. The design scorecard (<code>scorecard.md</code>) flagged these as the two scores resting on unverified assumptions and said explicitly: <em>"If the second assumption is wrong, lane enforcement isn't buildable and parallel throughput drops to about a 5. Both are an hour of testing."</em> That hour still hasn't happened. To the fix pass's credit, both fallback paths are coded defensively regardless of outcome: <code>hooks/sage-lane-after</code> (the detect-and-revert fallback for SPIKE-01) exists and is not double-registered in <code>hooks.json</code> (the original M3 issue is fixed), and <code>/sage-setup</code> unconditionally copies role cards into <code>&lt;project&gt;/.cursor/agents/</code> (the SPIKE-02 fallback), verified directly in <code>lib/setup/index.ts</code>. So the system is unlikely to be silently broken either way — but the owner is about to be the first person to actually find out, and should treat that as the literal first thing to check, not an afterthought.</p>
+<h3 id="f6-sage-evidence-runcheck-still-has-no-sprint-flag-at-the-cli-layer">F6 — <code>sage evidence run|check</code> still has no <code>--sprint</code> flag at the CLI layer</h3>
+<p>The library groundwork is real: <code>activeSprintDir(root?, sprintId?)</code> in <code>lib/evidence/index.ts</code> now accepts an explicit sprint id, with a code comment candidly noting <em>"lib/cli.ts does not yet thread an explicit sprint through here."</em> Confirmed: <code>lib/cli.ts</code> exposes <code>--sprint</code> for <code>sage board *</code> but not for <code>sage evidence run|check</code>. User-visible behavior is unchanged from the original review's minor finding — <code>evidence check</code> still silently reads whichever sprint directory sorts lexicographically last. Low-stakes in the common single-active-sprint case; matters once retro or a resumed session spans more than one sprint at a time.</p>
+<h3 id="f7-sage-carefuls-high-deny-tokenizer-misses-quotedbracedmulti-slash-variants-of-its-own-protected-patterns-see-22">F7 — <code>sage-careful</code>'s HIGH-deny tokenizer misses quoted/braced/multi-slash variants of its own protected patterns (see §2.2)</h3>
+<p>Degrades to "ask," never to silent allow, so this is a robustness gap rather than a safety hole — but <code>rm -rf "/"</code> and <code>rm -rf ${HOME}</code> are exactly the kind of thing a copy-pasted or LLM-generated command produces. Worth tightening the tokenizer to normalize quotes and braces before the token-set comparison.</p>
+<h3 id="f8-readmes-documented-install-path-doesnt-work-from-what-the-owner-actually-has">F8 — README's documented install path doesn't work from what the owner actually has</h3>
+<p><code>plugin/README.md</code>'s first instruction is "Installed via the marketplace at the repository root (<code>.cursor-plugin/marketplace.json</code> → <code>"source": "plugin"</code>)." That file exists — but at <code>/root/fix/.cursor-plugin/marketplace.json</code>, one directory <em>above</em> <code>plugin/</code>, not inside it. Per the task background, what's "deployed to the owner's actual machine" is <code>plugin/</code> itself. The README, which ships inside <code>plugin/</code>, points to a file that isn't inside the folder it ships in, and never mentions the symlink method (<code>ln -s "$PWD" ~/.cursor/plugins/local/sage-mode</code>) that tech-spec §4.3 calls the normative development-install path. Someone starting from exactly what the task says the owner has would not be able to follow the README's own first line without already knowing to look one directory up.</p>
+<h3 id="f9-design-system-references-a-query-mechanism-domain-uxa11y-stack-name-that-isnt-implemented-anywhere-in-this-repo">F9 — <code>design-system</code> references a query mechanism (<code>--domain ux/a11y</code>, <code>--stack &lt;name&gt;</code>) that isn't implemented anywhere in this repo</h3>
+<p>Per spec §10.5, this is meant to hit ui-ux-pro-max's 22-CSV BM25 tool. Nothing in <code>sage-mode</code> vendors that data, implements that query command, or declares ui-ux-pro-max as an install prerequisite (checked <code>README.md</code>, <code>.cursor-plugin/plugin.json</code>) — it's a dangling reference to a capability the shipped repo doesn't have.</p>
+<h3 id="what-i-looked-for-and-did-not-find-a-problem-in">What I looked for and did not find a problem in</h3>
+<p>Both blockers B1 (hooks) and B2 (the four originally-named glob shapes) are genuinely fixed, independently re-verified with payloads beyond the shipped fixtures, not just re-run. M2 (stale <code>parent-role</code> marker) is fixed and its self-cleaning behavior confirmed directly. M3's double-registration half is fixed (only <code>sage-lane</code> is wired into <code>hooks.json</code>; <code>sage-lane-after</code> exists but isn't simultaneously active). Schemas (5) and test fixtures (5) match 1:1. <code>rules/sage-conduct.mdc</code> correctly holds the cross-cutting behavior, and a repo-wide grep found no skill restating it. <code>sage-shape</code>, the four role cards I read in full, and the review/evidence pipeline (<code>lib/review</code>, <code>lib/evidence</code>) all hold up under direct code reading, not just their own tests passing.</p>
+<hr />
+<h2 id="4-sample-work-package-acceptance-checks">4. Sample work-package acceptance checks</h2>
+<ul>
+<li><strong>WP-06 (<code>lib/evidence</code>)</strong> — "All §11.1 evidence cases pass, including the index-immutability assertion." Confirmed: <code>wtree does not mutate the real .git/index</code> passes, byte-identity asserted directly in the test.</li>
+<li><strong>WP-08 (<code>lib/dag</code>)</strong> — "Rejects a cycle, <code>owns: ["**"]</code>, and an intersecting wave." The first two hold (tested directly). The third holds for every glob shape in the original table but <strong>not</strong> for character-class/<code>?</code> shapes — see F1.</li>
+<li><strong>WP-13 (<code>/sage-review</code>)</strong> — "Planted-bug and clean-diff evals both pass." Only half-true as measured: the planted-bug case passes; the clean-diff case is <strong>skipped</strong>, honestly, because it requires a live specialist subagent this sandbox can't invoke. The acceptance criterion as literally written ("both pass") is not actually satisfiable outside real Cursor — worth knowing before reading a "23/24 acceptance criteria met" summary as more settled than it is.</li>
+<li><strong>WP-15 (hooks)</strong> — "Every §11.2 case passes on macOS and Windows, including the BOM fixture." Verified for Linux (<code>dash</code>/<code>bash</code>) directly; Windows and macOS are unverifiable from this environment, same as the original review's limitation.</li>
+<li><strong>WP-16 (parallel worktrees)</strong> — <code>sage dag worktree</code> implemented and present in <code>sage-build/SKILL.md</code>'s procedure with <code>is_background: false</code> pinned per the spec's explicit instruction; not runnable end-to-end without live Cursor, same caveat as F5.</li>
+<li><strong>WP-24 (packaging)</strong> — "A fresh machine reaches 'roadmap rendered' in under fifteen minutes from the README alone." Untestable as literally written per F8 — the README's own first instruction doesn't resolve to a file that exists inside what ships.</li>
+</ul>
+<hr />
+<h2 id="5-five-repo-comparison-what-actually-changed-now-that-this-is-built">5. Five-repo comparison — what actually changed now that this is built</h2>
+<p>The design-time scorecard (<code>scorecard.md</code>) gave sage-mode's <em>design</em> a 9 on review rigour, a 9 on mechanical enforcement, a 10 on cost control, and flagged the two Cursor-platform assumptions as the load-bearing unknowns. Assessing the <em>built</em> repo against the same five systems, not the design document:</p>
+<p><strong>Beats gstack on mechanical enforcement portability, ties it on review-pipeline correctness, loses to it on proven depth.</strong> gstack's hooks are bash-only and its subagents pin no model at all — sage-mode's hooks now genuinely work under <code>dash</code>, independently verified, which gstack's own don't need to because gstack never targeted POSIX portability. <code>lib/review</code>'s confidence gate and dedup-with-boost are faithful, mechanically-enforced ports of gstack's mechanism and pass under direct testing. But gstack's 14-phase OWASP+STRIDE security audit and its specialist roster are real, field-used content refined against actual review traffic; sage-mode's <code>security-audit</code> catalog entry (§2.5/F3) has never seen a real diff and currently contains no security content at all. <strong>Honest loss:</strong> gstack's review depth is proven; sage-mode's pipeline is well-built but its content is, in the one place I checked closely, empty.</p>
+<p><strong>Beats superpowers on cost architecture and enforcement, loses to it on rationalization-table provenance.</strong> Superpowers has zero model tiering and its enforcement is textual, one hook. Sage-mode's three-lane cost architecture is real code (<code>lib/consult</code>, verified: refuses untrusted roots, never passes <code>--bare</code>, reports <code>rate_limit</code> rather than retrying silently) where superpowers has none. But superpowers' rationalization tables are explicitly built from excuses <em>observed during actual adversarial pressure-testing over time</em> — the tables I read in <code>sage-shape</code> and the catalog are well-written but invented in a single fix-pass sitting, not harvested from real runs, which is precisely the distinction tech-spec §13.1 itself draws ("An invented table is decoration; <code>/sage-retro</code> is what keeps them real"). <strong>Honest loss:</strong> sage-mode's tables read as good as superpowers' today; they aren't actually the same kind of artifact yet, because nothing has run.</p>
+<p><strong>Beats compound-eng's memory design (indexed vs. flat-unindexed), unverified in practice.</strong> <code>lib/recall</code>'s dedup-before-write and BM25 index are real, tested code — a genuine architectural improvement over CE's documented 78-file unindexed rot. But this has never accumulated a real learning corpus; the improvement is structurally sound and completely unproven at the scale where CE's problem actually showed up.</p>
+<p><strong>Loses to agent-skills on lifecycle breadth, cleanly and by a wide margin.</strong> Agent-skills' 24 skills are real, maintainer-refined content covering observability, deprecation, ADRs, CI/CD. Sage-mode's nominal 25-skill catalog covering the same ground is, per F3, a single template — this is the one comparison in this section where the built repo is unambiguously and by a large margin worse than the reference it explicitly claims to have adapted content from (§8.9).</p>
+<p><strong>Beats ui-ux-pro-max on intake depth and generic-output avoidance where the mechanism is actually implemented, but partially borrows a capability it doesn't ship.</strong> <code>/design-intake</code> and the three-mandate <code>/design-direction</code> mechanism are real, load-bearing design (confirmed present, matches spec §10.4's restrained/expressive/structural split), a genuine answer to ui-ux-pro-max's median-output problem. But <code>design-system</code>'s references to ui-ux-pro-max's own <code>--domain</code>/<code>--stack</code> query tool (F9) point at a capability this repo doesn't vendor, implement, or declare a dependency on — so the "design knowledge without the generic output" claim is only as strong as <code>/design-direction</code>'s own mandate mechanism, not the token/a11y lookups the spec described riding on ui-ux-pro-max's data.</p>
+<hr />
+<h2 id="6-what-to-do-before-you-trust-this-on-a-real-project">6. What to do before you trust this on a real project</h2>
+<p>Ordered by how much each one actually matters, not by effort to fix.</p>
+<ol>
+<li><strong>Run the two spikes for real, on your own Cursor install, before dispatching a parallel <code>/sage-build</code> wave.</strong> Write the results to <code>docs/spikes/SPIKE-01.md</code> and <code>SPIKE-02.md</code> as the spec requires. The fallback code is in place either way, but you should know which path you're actually on.</li>
+<li><strong>Fix the <code>globToRegExp</code>/<code>segmentRegExp</code> character-class and <code>?</code> gap in <code>lib/dag/index.ts</code> (F1) before relying on <code>/sage-dag</code>'s "no overlapping lanes" guarantee for anything but simple <code>*</code>/<code>**</code> globs.</strong> This is a two-function patch plus three test cases; it's the one finding in this review that reaches the same severity class as the original B2.</li>
+<li><strong>Point CI at <code>npm test</code>, not the hand-inlined subset (F2).</strong> One-line fix; otherwise a regression in the lint-floor logic (M8) could ship silently.</li>
+<li><strong>Know that the 25-skill catalog and <code>design-intake</code>'s references are currently decorative (F3, F4)</strong> — useful as a routing skeleton for <code>/sage-retro</code> to fill in later, not as content you can lean on today for security/migration/observability work. Don't be surprised when <code>security-audit</code> comes back with generic checklist language instead of an actual audit procedure.</li>
+<li><strong>Fix the README's install path (F8)</strong> before handing this to anyone else, or they'll hit the same dead end you would.</li>
+<li>Everything else in §3 (F6, F7, F9) is genuinely fine to leave as a follow-up — none of it silently permits something dangerous or blocks a normal sprint.</li>
+</ol>
+  <div class="foot">sage-mode notebook · rendered 2026-08-25</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#1-verdict">1. Verdict</a><a href="#2-what-i-independently-verified-and-how">2. What I independently verified, and how</a><a href="#3-findings-the-fix-pass-missed-or-only-partially-closed">3. Findings the fix pass missed or only partially closed</a><a href="#4-sample-work-package-acceptance-checks">4. Sample work-package acceptance checks</a><a href="#5-five-repo-comparison-what-actually-changed-now-that-this-is-built">5. Five-repo comparison — what actually changed now that this is built</a><a href="#6-what-to-do-before-you-trust-this-on-a-real-project">6. What to do before you trust this on a real project</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

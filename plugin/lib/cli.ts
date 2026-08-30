@@ -14,6 +14,7 @@ import {
   dedup,
   scope as reviewScope,
   select as reviewSelect,
+  checkRecommendation,
 } from "./review/index.js";
 import { consult } from "./consult/index.js";
 import {
@@ -25,6 +26,7 @@ import {
   writeBlocker,
   writeAnswer,
   activeSprint,
+  evaluateCircuitBreaker,
 } from "./board/index.js";
 import { buildIndex, saveIndex, loadIndex, search, dedupAppliesWhen } from "./recall/index.js";
 import { projectSageDir } from "./util.js";
@@ -51,11 +53,14 @@ Usage:
   sage review dedup
   sage review scope --base <ref>
   sage review select --scope <json> [--stats <file>] [--all-specialists]
+  sage review recommendation [--file F]   # reads markdown from stdin if no --file
   sage consult --role R [--brief F] [--schema S] [--session]
   sage board next [--sprint S]
   sage board status --sprint S --node N --state S
   sage board blocker --sprint S --node N
   sage board answer --sprint S --node N
+  sage board ledger [--sprint S]
+  sage board wtf [--sprint S]
   sage recall index
   sage recall "<query>" [--kind K] [-n N]
   sage recall dedup --applies-when "<text>"
@@ -223,9 +228,24 @@ async function main(argv: string[]): Promise<number> {
       const dagFile = opt(rest, "dag");
       if (!nodeId || !dagFile) fail("sage dag worktree <nodeId> --dag <dag.json>");
       const dag = loadDag(dagFile);
-      const p = worktree(nodeId, dag);
-      print({ path: p }, json, p);
-      return 0;
+      // worktree() shells out to `git worktree add ... <dag.base>` — nothing
+      // upstream (schema-only validate()) ever confirms dag.base resolves to
+      // a real ref, so a bad base surfaces here, at the point git actually
+      // rejects it. Without this catch, that Error propagated uncaught to
+      // main()'s top-level handler, which dumps a raw stack trace to stderr
+      // instead of the structured `{"violations": [...]}` shape every other
+      // `sage dag` subcommand uses on failure — a broken base ref looked
+      // like a crash, not a clean, reportable violation.
+      try {
+        const p = worktree(nodeId, dag);
+        print({ path: p }, json, p);
+        return 0;
+      } catch (e) {
+        const message = (e as Error).message || String(e);
+        const v = [{ code: "git", message: `dag.base did not resolve: ${message}` }];
+        print({ violations: v }, json, v.map((x) => `${x.code}: ${x.message}`).join("\n"));
+        return 1;
+      }
     }
     fail("sage dag validate|plan|lanes|worktree");
   }
@@ -270,7 +290,21 @@ async function main(argv: string[]): Promise<number> {
       print({ roster }, json);
       return 0;
     }
-    fail("sage review gate|dedup|scope|select");
+    if (sub === "recommendation") {
+      // Closes a real gap an independent complex-workload review found: this
+      // check existed as tested code (checkRecommendation) and skills/
+      // sage-review/SKILL.md instructed the agent to run it, but no CLI verb
+      // ever called it — the only interface the workflow actually teaches
+      // the agent to use. A faithfully-instructed agent had no way to reach
+      // it short of hand-writing a throwaway `node -e` script, which is the
+      // same self-report failure mode this mechanism exists to close.
+      const file = opt(rest, "file");
+      const markdown = file ? readFileSync(file, "utf8") : await readStdin();
+      const result = checkRecommendation(markdown);
+      print(result, json, result.issues.join("\n"));
+      return result.ok ? 0 : 1;
+    }
+    fail("sage review gate|dedup|scope|select|recommendation");
   }
 
   if (cmd === "consult") {
@@ -323,7 +357,21 @@ async function main(argv: string[]): Promise<number> {
       print(l, json);
       return l ? 0 : 1;
     }
-    fail("sage board next|status|blocker|answer|ledger");
+    if (sub === "wtf") {
+      // Same gap as `sage review recommendation` above: evaluateCircuitBreaker
+      // (lib/board/index.ts) was real, unit-tested code with no CLI verb
+      // calling it — skills/sage-build/SKILL.md tells the Eng Manager
+      // persona, in prose, "the Eng Manager never writes a WTF-LIKELIHOOD
+      // number into the ledger by hand," but the only tool surface it's
+      // taught to use (`sage <verb>`) had no way to actually compute one.
+      if (!sprint) fail("no sprint");
+      const l = loadLedger(sprint);
+      if (!l) return 1;
+      const result = evaluateCircuitBreaker(l);
+      print(result, json, `wtf=${result.score}% stopAndAsk=${result.stopAndAsk} hardCapReached=${result.hardCapReached}`);
+      return 0;
+    }
+    fail("sage board next|status|blocker|answer|ledger|wtf");
   }
 
   if (cmd === "recall") {

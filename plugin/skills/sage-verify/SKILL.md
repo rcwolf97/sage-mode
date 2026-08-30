@@ -32,10 +32,21 @@ alone.
    `web`) for the exact check list of `api`, `cli`, and `ai-product`.
 
 2. **Every required check must produce an artifact, no exceptions.** A
-   non-browser check (`suite`, `typecheck`) runs through `sage evidence run
-   --label <id> -- <command>` — the evidence wrapper — which tees output to a
-   capped log and writes a wtree-fingerprinted record; that record *is* the
-   artifact. **A check with no artifact under `evidence/` did not run.** A
+   non-browser check with a `command` field (`suite`, `typecheck`, and —
+   `api`/`cli`/`ai-product` profiles — `contract`, `migrations`, `errors`,
+   `golden`, `sandbox`, `ttfs`, `evals`, `prompts`) runs through `sage
+   evidence run --label <id> -- <command>` — the evidence wrapper — which
+   tees output to a capped log and writes a wtree-fingerprinted record; that
+   record *is* the artifact. **Resolve a `${verify.X}` placeholder by reading
+   the matching key from `.sage/config.json`'s `verify` object** (written by
+   `sage-setup`; `tests`/`typecheck`/`build` always get a default, the
+   profile-specific keys only if a prior setup or the user supplied one —
+   there is no generic default for "run the migration-safety analysis" the
+   way `npm test` is a safe default for `tests`). **If the key is absent,
+   the check has no command and did not run** — say so plainly in the
+   evidence summary per step 8, the same as a missing artifact. Never invent
+   a command to fill the gap and never silently drop the check from the
+   report. **A check with no artifact under `evidence/` did not run.** A
    verbal "tests passed" with nothing on disk is not evidence, no matter who
    says it.
 

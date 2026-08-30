@@ -142,10 +142,11 @@ node's branch, out-of-lane touches by diffing those files against the node's
 `owns` globs in `dag.json`, and the Low-severity signal from `findings.jsonl`
 (never from an empty read — no findings on record is "no data," not "all
 Low"). **The Eng Manager never writes a WTF-LIKELIHOOD number into the ledger
-by hand** — the ledger's Circuit section holds whatever `evaluateCircuitBreaker`
-last computed, full stop. A number that didn't come from that call is not the
-circuit breaker, it's the exact self-report failure mode this mechanism
-exists to close.
+by hand** — call `sage board wtf --sprint <id> --json` and copy its `score`
+verbatim into the ledger's Circuit section. That command is the only path to
+`evaluateCircuitBreaker`; there is no other way to get this number. A number
+that didn't come from that call is not the circuit breaker, it's the exact
+self-report failure mode this mechanism exists to close.
 
 **Score > 20 → STOP.** Show the user what has been done so far and ask
 whether to continue. This is not a suggestion to wrap up soon — halt the
