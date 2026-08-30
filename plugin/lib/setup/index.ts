@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
-import { gitRoot, pluginRoot, projectDocsDir, readJson, readSageHome, sageUserDir, VERSION, writeJson } from "../util.js";
+import { join, resolve } from "node:path";
+import { gitRoot, homeDir, pluginRoot, projectDocsDir, readJson, readSageHome, sageUserDir, VERSION, writeJson } from "../util.js";
 import {
   classify,
   installFile,
@@ -68,6 +68,37 @@ function recordResult(report: SetupFileReport, res: InstallResult): void {
   else report.preserved.push(res.path);
 }
 
+// The project-relative path installFile()/readManifest() track it as (see
+// lib/manifest/index.ts's MANIFEST_REL) — duplicated here as a literal rather
+// than imported so lib/setup stays the only owner of "does a manifest exist
+// yet" as a signal, without adding a new export to a module we don't own.
+const INSTALL_MANIFEST_REL = join(".sage", "install-manifest.json");
+
+// Detects the one configuration that makes the user-level config and the
+// project config the *same file on disk*: HOME pointed at the project root
+// itself (a repo checked out at ~, or a container/CI where HOME == the
+// workdir). sageUserDir() is `$HOME/.sage`; the project config lives at
+// `<root>/.sage/config.json`. When HOME === root, both resolve to
+// `<root>/.sage/config.json`, and whichever one setup() writes second
+// silently clobbers the other — in practice the user-level write (sageHome,
+// trustedRoots) stomps the project's `lanes` block, and `sage egress grants`
+// then honestly, and wrongly, reports nothing can leave the machine. Returns
+// a human-actionable message naming both paths, or null when there is no
+// collision.
+function homeProjectCollision(root: string): string | null {
+  const userDir = resolve(sageUserDir());
+  const projectSageDir = resolve(join(root, ".sage"));
+  if (userDir !== projectSageDir) return null;
+  return (
+    `the user-level sage config directory (${userDir}) and this project's .sage directory ` +
+    `(${projectSageDir}) are the same path, because $HOME (${homeDir()}) is the project root ` +
+    `itself. Writing either config would silently overwrite the other — most dangerously, the ` +
+    `project's "lanes" block would be clobbered by the user-level config, and \`sage egress ` +
+    `grants\` would then report nothing can leave the machine even though it can. ` +
+    `Run sage from a project directory that is not your home directory.`
+  );
+}
+
 export function setup(opts?: {
   project?: string;
   profile?: string;
@@ -76,9 +107,17 @@ export function setup(opts?: {
   sageHome?: string;
 }): SetupResult {
   const sageHome = opts?.sageHome || pluginRoot;
+  const root = opts?.project || gitRoot() || process.cwd();
+  // Fail loud, before touching disk: see homeProjectCollision() above. This
+  // must run before the first mkdirSync/writeFileSync below — a setup that
+  // detects the collision only after it has already written something has
+  // already done the damage it exists to prevent.
+  const collision = homeProjectCollision(root);
+  if (collision) {
+    throw new Error(`sage setup refused: ${collision}`);
+  }
   const user = sageUserDir();
   mkdirSync(join(user, "bin"), { recursive: true });
-  const root = opts?.project || gitRoot() || process.cwd();
   const existing = existsSync(join(user, "config.json"))
     ? (JSON.parse(readFileSync(join(user, "config.json"), "utf8")) as {
         trustedRoots?: string[];
@@ -240,7 +279,16 @@ export interface HealthReport {
   gitignore: { sageIgnored: boolean; worktreesIgnored: boolean };
   verify: VerifyCheckStatus[];
   manifest: { ownedClean: number; ownedModified: number; unowned: number; missing: number };
+  /** Every finding, gap and broken alike — kept for backward compatibility
+   * with the CLI's renderHealthReport(), which already prints this list as
+   * "gaps" in the human-readable report. Use `problems` (below) to tell the
+   * two severities apart programmatically. */
   gaps: string[];
+  /** The subset of `gaps` that is genuinely BROKEN — something that will not
+   * work and that the operator must act on, per compound-engineering's
+   * health-check contract: an absence is never a failure, only a gap.
+   * `ok` is exactly `problems.length === 0`. */
+  problems: string[];
   ok: boolean;
 }
 
@@ -269,25 +317,52 @@ function probeInterpreter(name: string, noopArgs: string[]): InterpreterStatus {
 }
 
 // Read-only capability report: resolves environment, project, and manifest
-// state and probes for optional tooling, but never writes anything. Every
-// absence is reported as a gap for the user to act on if they care about that
-// workflow, never as a thrown failure — sage should run fine without, say,
-// python3 if nothing the user does needs it.
+// state and probes for optional tooling, but never writes anything.
+//
+// Severity contract (deliberately mirrors compound-engineering's health-check
+// posture): every finding is either a GAP — a capability that is merely
+// absent because `sage setup` hasn't run yet, or an optional tool nothing
+// requires — or a PROBLEM — something genuinely BROKEN that will not work
+// and that the operator must act on. An absence alone is never a failure;
+// `ok` reflects `problems` only, never `gaps`. Both severities are still
+// appended to `gaps` (see the HealthReport doc comment) so the CLI's
+// existing human-readable renderer keeps showing every finding, gap or not.
+function note(gaps: string[], problems: string[], message: string, severity: "gap" | "broken"): void {
+  gaps.push(message);
+  if (severity === "broken") problems.push(message);
+}
+
 export function checkHealth(opts?: { project?: string }): HealthReport {
   const sageHome = readSageHome() || pluginRoot;
   const root = opts?.project || gitRoot() || process.cwd();
   const gaps: string[] = [];
+  const problems: string[] = [];
+
+  // Bug 2: HOME resolving to the project root itself makes the user config
+  // and the project config the same file — see homeProjectCollision() above.
+  // This is never a gap: it is actively, silently corrupting whichever
+  // config gets written second, so it is reported BROKEN unconditionally.
+  const collision = homeProjectCollision(root);
+  if (collision) note(gaps, problems, collision, "broken");
 
   const notebookRoot = projectDocsDir(root);
   let notebookSource: "project-config" | "default" = "default";
   const projectCfgPath = join(root, ".sage", "config.json");
   let projectCfg: { notebook?: { root?: string }; verify?: Record<string, string> } | undefined;
-  if (existsSync(projectCfgPath)) {
+  if (!existsSync(projectCfgPath)) {
+    // Not-yet-set-up is a gap, not a failure: a fresh repo that has never run
+    // `sage setup` has no project config yet, by design.
+    note(gaps, problems, "no project .sage/config.json — run `sage setup` to create one", "gap");
+  } else {
     try {
       projectCfg = readJson<{ notebook?: { root?: string }; verify?: Record<string, string> }>(projectCfgPath);
       if (projectCfg?.notebook?.root) notebookSource = "project-config";
     } catch {
-      gaps.push(`${projectCfgPath} exists but is not valid JSON`);
+      // A config that exists but is malformed is genuinely broken — every
+      // command that reads it (verify commands, lanes, notebook root) is
+      // silently falling back to defaults instead of what the operator
+      // actually configured.
+      note(gaps, problems, `${projectCfgPath} exists but is not valid JSON`, "broken");
     }
   }
 
@@ -297,26 +372,44 @@ export function checkHealth(opts?: { project?: string }): HealthReport {
     probeInterpreter("git", ["--version"]),
     probeInterpreter("claude", ["--version"]),
   ];
-  let broken = false;
   for (const i of interpreters) {
     if (!i.present) {
-      gaps.push(`${i.name} not found on PATH (optional — only needed for workflows that use it)`);
+      // Absent is always a gap, `claude` included — Lane B is optional and
+      // the code already documents a Lane A fallback for it.
+      note(gaps, problems, `${i.name} not found on PATH (optional — only needed for workflows that use it)`, "gap");
     } else if (!i.runs) {
-      gaps.push(`${i.name} is on PATH but failed to execute — broken install or wrong architecture`);
-      broken = true;
+      // Present but non-functional is the confusing failure mode worth
+      // failing loudly on: a broken install or wrong architecture, not an
+      // intentional absence.
+      note(
+        gaps,
+        problems,
+        `${i.name} is on PATH but failed to execute — broken install or wrong architecture`,
+        "broken",
+      );
     }
   }
 
+  const manifestInstalled = existsSync(join(root, INSTALL_MANIFEST_REL));
   const giLines = existsSync(join(root, ".gitignore"))
     ? readFileSync(join(root, ".gitignore"), "utf8").split(/\r?\n/)
     : [];
   const sageIgnored = giLines.includes(".sage/");
   const worktreesIgnored = giLines.includes(".worktrees/");
   if (!sageIgnored || !worktreesIgnored) {
-    gaps.push(
+    // Before `sage setup` has ever run, this is exactly the gap setup is
+    // about to fix — a fresh clone reporting ok:false here would be the
+    // first thing a new engineer sees, for a condition that isn't broken,
+    // it's just not-yet-set-up. Once an install manifest exists, setup has
+    // already run once — a .gitignore that reverted (or never got committed)
+    // after that really does silently break evidence forever (see
+    // lib/evidence's checkSageIgnored), so it's genuinely broken from here.
+    note(
+      gaps,
+      problems,
       ".sage/ and/or .worktrees/ are not gitignored — evidence fingerprints will silently grade STALE forever until this is fixed",
+      manifestInstalled ? "broken" : "gap",
     );
-    broken = true;
   }
 
   const verify: VerifyCheckStatus[] = [];
@@ -325,8 +418,7 @@ export function checkHealth(opts?: { project?: string }): HealthReport {
     const resolvable = bin.length > 0 && locate(bin);
     verify.push({ key, command: String(command), resolvable });
     if (!resolvable) {
-      gaps.push(`verify.${key} ("${command}") does not resolve to a runnable command`);
-      broken = true;
+      note(gaps, problems, `verify.${key} ("${command}") does not resolve to a runnable command`, "broken");
     }
   }
 
@@ -348,7 +440,12 @@ export function checkHealth(opts?: { project?: string }): HealthReport {
     tally(classify(root, entry.path, manifest));
   }
   if (counts.ownedModified > 0) {
-    gaps.push(`${counts.ownedModified} project file(s) were customized after install and are preserved as-is`);
+    note(
+      gaps,
+      problems,
+      `${counts.ownedModified} project file(s) were customized after install and are preserved as-is`,
+      "gap",
+    );
   }
 
   return {
@@ -360,6 +457,7 @@ export function checkHealth(opts?: { project?: string }): HealthReport {
     verify,
     manifest: counts,
     gaps,
-    ok: !broken,
+    problems,
+    ok: problems.length === 0,
   };
 }

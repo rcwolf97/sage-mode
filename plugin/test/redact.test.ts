@@ -164,6 +164,53 @@ test("redacting already-redacted text is a true no-op: same text, zero new redac
   assert.deepEqual(second.kinds, {});
 });
 
+// --- line-count / line-boundary preservation (path:line citations depend on this) ---
+
+test("redacting a multi-line PEM private-key block does not change the surrounding line count: every line after the block keeps its original line number", () => {
+  const pem = [
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "MIIEowIBAAKCAQEAxq8example000000000000000000000000000000000000",
+    "restofthekeymaterialthatspansmultiplelinesinarealprivatekeyfile",
+    "-----END RSA PRIVATE KEY-----",
+  ].join("\n");
+  const text = `line1\nline2\n${pem}\nline_after_key\nline_final`;
+  const inputLines = text.split("\n");
+  const r = redact(text);
+  const outputLines = r.text.split("\n");
+  assert.equal(outputLines.length, inputLines.length, "redaction must not change the total line count");
+  // The content that was NOT part of the secret must still sit on the same
+  // line number it started on — this is what makes a `path:42` citation
+  // against the redacted payload still point at the right line.
+  assert.equal(outputLines[0], "line1");
+  assert.equal(outputLines[1], "line2");
+  assert.equal(outputLines[inputLines.length - 2], "line_after_key");
+  assert.equal(outputLines[inputLines.length - 1], "line_final");
+});
+
+// --- false negative: an unrelated identifier immediately before a real
+// secret assignment on the same line must not "swallow" it ---
+
+test("a non-secret key immediately before a real secret assignment on the same line does not shield the real secret from redaction", () => {
+  const r = redact("note: password: hunter2superSecretValue123");
+  assert.ok(!r.text.includes("hunter2superSecretValue123"), r.text);
+  assert.ok(r.text.includes("«REDACTED:secret-assignment"), r.text);
+});
+
+test("the same swallowing pattern inside a comment-like prefix still redacts the real secret", () => {
+  const r = redact("// TODO remove before commit: password: hunter2superSecretValue123");
+  assert.ok(!r.text.includes("hunter2superSecretValue123"), r.text);
+  assert.ok(r.text.includes("«REDACTED:secret-assignment"), r.text);
+});
+
+// --- false negative: a JSON-escaped quote inside a quoted secret value
+// must not truncate the match early ---
+
+test("a secret value containing a JSON-escaped double quote is fully redacted, not truncated at the escape", () => {
+  const r = redact('{"password": "va\\"lue_with_more_secret_stuff_1234"}');
+  assert.ok(!r.text.includes("lue_with_more_secret_stuff_1234"), r.text);
+  assert.ok(r.text.includes("«REDACTED:secret-assignment"), r.text);
+});
+
 test("count and kinds accurately tally a mixed payload", () => {
   const r = redact(
     ["AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", "GITHUB_TOKEN=" + "ghp_" + "a".repeat(36), 'password: "hunter2superSecret"'].join("\n"),

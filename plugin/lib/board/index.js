@@ -110,7 +110,29 @@ export function loadLedger(sprint, root) {
     const p = ledgerPath(sprint, root);
     if (!existsSync(p))
         return null;
-    return parseLedger(readFileSync(p, "utf8"));
+    const text = readFileSync(p, "utf8");
+    // parseLedger is deliberately lenient (every field falls back to "" / 0 /
+    // [] rather than throwing) so a still-being-written or oddly-formatted
+    // ledger doesn't crash a reader mid-write. But that leniency means an
+    // empty, truncated, or otherwise unparseable file — existsSync sees it,
+    // so the "no ledger" branch above never fires — produces a fully-formed,
+    // *valid-looking* empty Ledger instead of a signal that something is
+    // wrong. That is a real false-PASS risk for a caller like
+    // evaluateCircuitBreakerForSprint: a corrupted ledger.md (crashed
+    // mid-write, a concurrent-write race, a zero-byte file) would otherwise
+    // mechanically score as a clean wtf:0/stopAndAsk:false rather than
+    // raising the same loud failure a genuinely missing ledger gets.
+    //
+    // The bar deliberately stays low — any recognizable `## ` section heading
+    // — rather than requiring the exact renderLedger() header line, so a
+    // hand-authored or intentionally-terse ledger fixture (real ones in the
+    // wild, and in this codebase's own CLI tests) that a human clearly meant
+    // as ledger content still loads normally. What it excludes is content
+    // with no markdown structure at all: an empty file, or binary/garbage
+    // bytes from a crash or partial write.
+    if (!/^## /m.test(text))
+        return null;
+    return parseLedger(text);
 }
 export class LedgerNotFoundError extends Error {
     code = "no-ledger";

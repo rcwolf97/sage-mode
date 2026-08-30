@@ -287,6 +287,35 @@ test("classifyFix always asks a human for a cannot_verify finding, never auto-fi
 // silently breaks — the agent would be told to pass a path that 404s. This
 // test makes that drift a build-time failure instead of a runtime surprise
 // discovered mid-review.
+// -----------------------------------------------------------------------
+// dedup() calls gate() internally (to key/merge only well-formed rows) but
+// must not silently swallow the rejection info gate() already computed.
+// `sage review gate` surfaces `.rejected` and flips its exit code non-zero
+// on a malformed row (see test/cli.test.ts); `sage review dedup` — the very
+// next stage of the same pipeline (skills/sage-review/SKILL.md step 5: gate
+// -> dedup) — must not be a laundering step that turns "N rows rejected"
+// back into an invisible, silently-dropped clean bill of health for any
+// caller that goes through dedup()'s return value directly.
+// -----------------------------------------------------------------------
+test("dedup() surfaces rejected rows via .rejected, the same way gate() does, instead of silently dropping them", () => {
+    const good = {
+        severity: "HIGH",
+        confidence: 8,
+        path: "src/a.ts",
+        line: 1,
+        category: "security",
+        summary: "real finding",
+        evidence: "src/a.ts:1",
+        specialist: "security",
+    };
+    const malformed = { ...good, severity: "SUPER-BAD" };
+    const out = dedup([good, malformed]);
+    assert.equal(out.length, 1, "only the well-formed row should survive dedup");
+    assert.equal(out[0].path, "src/a.ts");
+    assert.ok(out.rejected, ".rejected must be present on dedup()'s return, not undefined");
+    assert.equal(out.rejected.length, 1, "the malformed row must be reported, not dropped without a trace");
+    assert.match(out.rejected[0].reason, /severity/i);
+});
 test("every specialist in SPECIALIST_ROSTER has a checklist file sage-review/SKILL.md can actually dispatch", () => {
     for (const name of SPECIALIST_ROSTER) {
         const path = join(import.meta.dirname, "..", "skills", "sage-review", "references", "checklists", `${name}.md`);

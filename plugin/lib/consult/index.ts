@@ -69,28 +69,36 @@ export function extractModelReceipt(rawOutput: string): ModelReceipt {
   return { verified: false, models: [] };
 }
 
-function trustedRoots(): string[] {
+// Returns both the roots list AND whether ~/.sage/config.json exists at
+// all — assertTrusted needs to tell "setup hasn't run yet" (permissive,
+// first-run) apart from "setup's config exists but names no roots, or no
+// longer names this one" (must refuse), and a bare string[] can't carry
+// that distinction: [] means the same thing either way once returned.
+function trustedRootsState(): { configExists: boolean; roots: string[] } {
   const cfg = join(sageUserDir(), "config.json");
-  if (!existsSync(cfg)) return [];
+  if (!existsSync(cfg)) return { configExists: false, roots: [] };
   try {
     const data = JSON.parse(readFileSync(cfg, "utf8")) as { trustedRoots?: string[] };
-    return data.trustedRoots || [];
+    return { configExists: true, roots: data.trustedRoots || [] };
   } catch {
-    return [];
+    // Corrupt config: treat like "doesn't exist" rather than guessing at
+    // intent from unparseable content.
+    return { configExists: false, roots: [] };
   }
 }
 
 export function assertTrusted(cwd?: string): void {
   const root = gitRoot(cwd) || cwd || process.cwd();
-  const roots = trustedRoots();
-  if (!roots.length) {
-    /* first-run: setup will add; refuse only if config exists without this root */
-    const cfg = join(sageUserDir(), "config.json");
-    if (existsSync(cfg) && roots.length === 0) {
-      /* allow empty until setup writes roots — still refuse unknown after list exists */
-    }
-    return;
-  }
+  const { configExists, roots } = trustedRootsState();
+  // First-run only: no ~/.sage/config.json has ever been written (`sage
+  // setup` will create one naming this root). Once the file exists, trust
+  // is governed by its trustedRoots list — including the case where that
+  // list is empty (e.g. every project was removed via `sage uninstall
+  // --purge-user-config`), which must refuse, not silently allow
+  // everything. The previous code checked `existsSync(cfg)` here but never
+  // acted on it — a dead branch that made an explicitly empty trustedRoots
+  // behave exactly like "no config yet".
+  if (!configExists) return;
   if (!roots.some((r) => root === r || root.startsWith(r.endsWith("/") ? r : r + "/"))) {
     throw Object.assign(new Error(`consult refused: ${root} is not a trusted root`), { code: 3 });
   }
@@ -221,14 +229,20 @@ export function consult(opts: {
         : join(home, "agents", "architect.md");
   const rawPrompt = opts.prompt || (opts.brief && existsSync(opts.brief) ? readFileSync(opts.brief, "utf8") : "");
   const redacted = redact(rawPrompt);
+  // opts.schema's content is read straight into an argv element handed to
+  // `claude` below, exactly the same way the prompt is — it must go through
+  // the same redact-before-it-leaves-the-machine gate the prompt does, and
+  // the egress ledger's byte/hash accounting must reflect it too, or the
+  // ledger would understate what actually left the machine on this call.
+  const redactedSchema = opts.schema && existsSync(opts.schema) ? redact(readFileSync(opts.schema, "utf8")) : null;
   const egressPayload = {
-    bytes: Buffer.byteLength(redacted.text, "utf8"),
-    content_sha256: sha256(redacted.text),
-    redactions: redacted.count,
+    bytes: Buffer.byteLength(redacted.text + (redactedSchema?.text ?? ""), "utf8"),
+    content_sha256: sha256(redacted.text + (redactedSchema?.text ?? "")),
+    redactions: redacted.count + (redactedSchema?.count ?? 0),
   };
   const args = ["-p", redacted.text, "--allowedTools", "Read,Grep,Glob", "--output-format", "json"];
   if (existsSync(roleFile)) args.push("--append-system-prompt-file", roleFile);
-  if (opts.schema && existsSync(opts.schema)) args.push("--json-schema", readFileSync(opts.schema, "utf8"));
+  if (redactedSchema) args.push("--json-schema", redactedSchema.text);
   const sessionFile = join(projectSageDir(opts.cwd), "consult-session");
   const resume = opts.resume || (opts.session && existsSync(sessionFile) ? readFileSync(sessionFile, "utf8").trim() : "");
   if (resume) args.push("--resume", resume);

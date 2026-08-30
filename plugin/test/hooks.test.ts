@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const hooks = fileURLToPath(new URL("../hooks", import.meta.url));
+const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
 function run(hook: string, payload: string, env: Record<string, string> = {}) {
   const r = spawnSync(join(hooks, hook), {
@@ -233,6 +234,81 @@ test("host-detect falls back to the payload's hook_event_name when no host env v
   const json = JSON.parse((r.stdout || "").trim() || "{}");
   assert.equal(json.hookSpecificOutput?.permissionDecision, "deny");
   assert.equal(r.status, 2);
+});
+
+// --- Manifest integrity: a renamed/moved/non-executable hook must never be
+// able to silently unregister itself. hooks.json / hooks-claude.json are the
+// ONLY thing that wires a command path to an event; nothing else notices if
+// that path stops resolving — the host just silently never runs the hook,
+// which for a deny-tier hook is exactly the "protection stops and nobody
+// finds out" failure mode this whole plugin exists to avoid.
+
+function isExecutable(path: string): boolean {
+  try {
+    // X_OK-equivalent: any of the three execute bits set. fs.constants.X_OK
+    // via accessSync would also pass for root regardless of the bits, which
+    // is how this test suite's own CI/dev-container user often runs — check
+    // the mode bits directly instead so a `chmod -x` regression is still
+    // caught even when running as root.
+    return (statSync(path).mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+test("both plugin.json manifests are well-formed JSON and every declared component path resolves", () => {
+  for (const rel of [".claude-plugin/plugin.json", ".cursor-plugin/plugin.json"]) {
+    const p = join(pluginRoot, rel);
+    const text = readFileSync(p, "utf8");
+    let manifest: Record<string, any>;
+    assert.doesNotThrow(() => {
+      manifest = JSON.parse(text);
+    }, `${rel} must be valid JSON`);
+    manifest = JSON.parse(text);
+    for (const key of ["skills", "agents", "commands", "hooks", "rules"]) {
+      const val = manifest[key];
+      if (val === undefined) continue;
+      assert.equal(typeof val, "string", `${rel}: "${key}" must be a path string`);
+      assert.ok(existsSync(join(pluginRoot, val)), `${rel}: "${key}" -> "${val}" does not exist`);
+    }
+  }
+});
+
+test("hooks.json (Cursor): every command path exists and is executable", () => {
+  const manifest = JSON.parse(readFileSync(join(hooks, "hooks.json"), "utf8"));
+  let checked = 0;
+  for (const entries of Object.values(manifest.hooks as Record<string, any[]>)) {
+    for (const entry of entries as any[]) {
+      const cmd: string = entry.command;
+      assert.ok(cmd.startsWith("./"), `hooks.json command "${cmd}" expected to be a "./"-relative path`);
+      const resolved = join(hooks, cmd.slice(2));
+      assert.ok(existsSync(resolved), `hooks.json command "${cmd}" -> "${resolved}" does not exist`);
+      assert.ok(isExecutable(resolved), `hooks.json command "${cmd}" -> "${resolved}" is not executable`);
+      checked++;
+    }
+  }
+  assert.ok(checked > 0, "expected at least one hooks.json command to have been checked");
+});
+
+test("hooks-claude.json: every command path (after ${CLAUDE_PLUGIN_ROOT} substitution) exists and is executable", () => {
+  const manifest = JSON.parse(readFileSync(join(hooks, "hooks-claude.json"), "utf8"));
+  let checked = 0;
+  for (const matchers of Object.values(manifest.hooks as Record<string, any[]>)) {
+    for (const matcher of matchers as any[]) {
+      for (const entry of matcher.hooks as any[]) {
+        const cmd: string = entry.command;
+        assert.ok(
+          cmd.startsWith("${CLAUDE_PLUGIN_ROOT}/"),
+          `hooks-claude.json command "${cmd}" expected to start with \${CLAUDE_PLUGIN_ROOT}/`,
+        );
+        const resolved = cmd.replace("${CLAUDE_PLUGIN_ROOT}", pluginRoot);
+        assert.ok(existsSync(resolved), `hooks-claude.json command "${cmd}" -> "${resolved}" does not exist`);
+        assert.ok(isExecutable(resolved), `hooks-claude.json command "${cmd}" -> "${resolved}" is not executable`);
+        checked++;
+      }
+    }
+  }
+  assert.ok(checked > 0, "expected at least one hooks-claude.json command to have been checked");
 });
 
 void chmodSync;

@@ -196,4 +196,76 @@ if command -v dash >/dev/null 2>&1; then
   run_solo_sequence "$(command -v dash)" dash
 fi
 
+# M3 — direct probe of json-safe.sh's pure-awk _json_escape_fallback, the
+# last-resort tier reached only when python3, node, AND jq are ALL
+# unavailable. No current hook caller actually routes attacker/dynamic
+# content through this tier today (every dynamic deny message is built by
+# python3/node before emit_* ever runs, and emit_*'s own python3/node/jq
+# checks would already have succeeded in that case) — but it is the
+# explicitly least-trusted tier (see the block comment above
+# _json_escape_fallback), so it gets a direct, interpreter-bypassing round
+# trip here rather than relying on it being exercised incidentally through
+# some hook's fixture. Source json-safe.sh under $NOBIN (no python3/node/jq)
+# and call the deny cascade directly with pathological messages, then
+# validate + round-trip the result with the REAL python3 (outside $NOBIN).
+# Regression target: a message ending in "\n" (one or more) used to be
+# silently truncated by awk's default record splitting (RS="\n" treats a
+# trailing separator as a terminator, not as introducing an empty final
+# record) — the JSON stayed valid, but the message content was corrupted.
+run_awk_fallback_probe() {
+  echo "test [(shebang default)] json-safe.sh _json_escape_fallback (awk-only tier)"
+  local probe_fail=0
+  local probe
+  probe=$(mktemp "${TMPDIR:-/tmp}/sage-hooks-awkprobe.XXXXXX")
+  cat > "$probe" <<'EOSH'
+DIR="$1"; MSG="$2"
+. "$DIR/json-safe.sh"
+SAGE_HOST=claude
+_sage_claude_permission deny "$MSG"
+EOSH
+  check_one() {
+    local label="$1" msg="$2"
+    local out
+    out=$(env -i PATH="$NOBIN" HOME="${HOME:-/root}" sh "$probe" "$HOOKS" "$msg" 2>&1)
+    python3 - "$out" "$msg" "$label" <<'EOPY' || probe_fail=1
+import json, sys
+out, msg, label = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.loads(out)
+except Exception as e:
+    print("FAIL awk-fallback", label, "invalid JSON:", e, "\n got:", out)
+    sys.exit(1)
+reason = d.get("hookSpecificOutput", {}).get("permissionDecisionReason")
+if reason != msg:
+    print("FAIL awk-fallback", label, "\n expect", repr(msg), "\n got   ", repr(reason))
+    sys.exit(1)
+print("ok", label)
+EOPY
+  }
+  # printf -v (a bash builtin assignment), NOT "$(printf ...)": a command
+  # substitution strips ALL trailing newlines from its own output, which
+  # would silently zero out exactly the trailing-newline cases below before
+  # msg is ever passed to check_one — the same class of bug this probe
+  # exists to catch, just relocated into the test harness itself. An
+  # earlier version of this probe made that mistake and passed unconditionally
+  # (the stripped expected value matched the stripped-by-the-same-bug actual
+  # value) even against the pre-fix, actually-broken _json_escape_fallback.
+  local msg
+  printf -v msg 'line1\nline2\n'; check_one "trailing-1nl" "$msg"
+  printf -v msg 'line1\n\n'; check_one "trailing-2nl" "$msg"
+  printf -v msg '\n'; check_one "only-nl" "$msg"
+  printf -v msg '\nabc'; check_one "leading-nl" "$msg"
+  printf -v msg 'a\nb\n\nc'; check_one "interior-multi-nl" "$msg"
+  check_one "quote" 'a"b'
+  check_one "backslash" 'a\b'
+  printf -v msg 'a\tb'; check_one "tab" "$msg"
+  check_one "emoji-utf8" 'héllo 😀 世界'
+  printf -v msg '%*s' 5000 ''; msg=${msg// /x}; check_one "long4kb" "$msg"
+  rm -f "$probe"
+  if [ "$probe_fail" = 1 ]; then
+    fail=1
+  fi
+}
+run_awk_fallback_probe
+
 exit $fail

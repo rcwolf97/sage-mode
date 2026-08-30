@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { sha256 } from "../lib/util.js";
 import { record, list, verify, grants, egressPath, canonicalJson, GENESIS_HASH } from "../lib/egress/index.js";
@@ -153,4 +156,40 @@ test("grants reports each non-local configured lane with a literal revoke comman
 test("grants returns an empty list when there is no config at all", () => {
     const root = tmp();
     assert.deepEqual(grants(root), []);
+});
+// --- grants() revokeCommand must be safe to literally copy-paste, even
+// when the lane role name comes from an untrusted/handcrafted project
+// config (.sage/config.json can be committed to a shared repo) ---
+test("a hostile lane role name cannot break out of the generated revokeCommand to run arbitrary code when the command is actually executed", () => {
+    const root = tmp();
+    mkdirSync(join(root, ".sage"), { recursive: true });
+    const marker = join(root, "PWNED");
+    const evilRole = `x']='local';require('node:fs').writeFileSync('${marker}','pwned');//`;
+    writeFileSync(join(root, ".sage", "config.json"), JSON.stringify({ lanes: { [evilRole]: "claude-cli" } }));
+    const g = grants(root);
+    assert.equal(g.length, 1);
+    // Simulate the user literally running the "copy-pasteable command" the
+    // module promises — from the project root, exactly as documented.
+    execSync(g[0].revokeCommand, { cwd: root });
+    assert.equal(existsSync(marker), false, "the revoke command must never execute attacker-controlled code");
+});
+// --- concurrency: two real OS processes racing record() on the same ledger ---
+const RACE_WORKER = fileURLToPath(new URL("./helpers/egress-race-worker.mjs", import.meta.url));
+test("N concurrent record() calls from separate processes never produce a duplicate seq or a chain verify() calls broken", async () => {
+    const root = tmp();
+    const N = 12;
+    const procs = Array.from({ length: N }, () => new Promise((resolve, reject) => {
+        const p = spawn(process.execPath, [RACE_WORKER, root]);
+        let stderr = "";
+        p.stderr.on("data", (d) => (stderr += d));
+        p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`worker exit ${code}: ${stderr}`))));
+        p.on("error", reject);
+    }));
+    await Promise.all(procs);
+    const rows = list(root);
+    assert.equal(rows.length, N, "every concurrent record() call must land its own row");
+    const seqs = rows.map((r) => r.seq).sort((a, b) => a - b);
+    assert.deepEqual(seqs, Array.from({ length: N }, (_, i) => i + 1), "seq numbers must be unique and contiguous, not duplicated by a race");
+    const v = verify(root);
+    assert.equal(v.ok, true, v.reason);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
-import { validate, plan, lanes, globIntersect, validateFile } from "../lib/dag/index.js";
+import { validate, plan, lanes, globIntersect, validateFile, } from "../lib/dag/index.js";
 import { pluginRoot } from "../lib/util.js";
 const base = {
     version: 1,
@@ -254,6 +254,43 @@ test("dag validate with no constraints field validates exactly as before (backwa
     const v = validate(base);
     assert.ok(!v.some((x) => x.message.includes("constraints")));
 });
+// --- unknown/misspelled fields (schemas/dag.schema.json declares
+// additionalProperties: false everywhere; validate() must actually enforce
+// that, not just document it — otherwise a typo silently loses the field it
+// meant to set instead of failing loudly). -------------------------------
+test("dag validate rejects a misspelled node field (dependsOn instead of depends_on) instead of silently ignoring it", () => {
+    // The realistic failure this guards against: an author typos depends_on
+    // as dependsOn. Without an additionalProperties check, this node quietly
+    // has NO dependencies (dependsOn is not a real field, depends_on is
+    // undefined) — it lands in wave 0 with none of the ordering the author
+    // intended, and validate() reports a clean bill of health.
+    const dag = {
+        ...base,
+        nodes: [{ ...base.nodes[0], depends_on: undefined, dependsOn: ["n2"] }, base.nodes[1]],
+    };
+    const v = validate(dag);
+    assert.ok(v.some((x) => x.code === "schema" && /dependsOn/.test(x.message)), `expected a schema violation naming the unknown field "dependsOn": ${JSON.stringify(v)}`);
+});
+test("dag validate rejects an unknown top-level field on the dag object", () => {
+    const dag = { ...base, bogusTopLevelField: true };
+    const v = validate(dag);
+    assert.ok(v.some((x) => x.code === "schema" && /bogusTopLevelField/.test(x.message)), `expected a schema violation naming the unknown top-level field: ${JSON.stringify(v)}`);
+});
+test("dag validate rejects an unknown field inside interfaces", () => {
+    const dag = {
+        ...base,
+        nodes: [
+            { ...base.nodes[0], interfaces: { consumes: [], bogus: true } },
+            base.nodes[1],
+        ],
+    };
+    const v = validate(dag);
+    assert.ok(v.some((x) => x.code === "schema" && /bogus/.test(x.message)), `expected a schema violation naming the unknown interfaces field: ${JSON.stringify(v)}`);
+});
+test("dag validate accepts a fully well-formed dag with no unknown fields anywhere (backward compatible)", () => {
+    const v = validate(base);
+    assert.ok(!v.some((x) => x.code === "schema" && /unknown|unexpected/i.test(x.message)));
+});
 // --- per-node interfaces: referential validation ------------------------
 test("dag validate: interface-unproduced when a node consumes an identifier nothing produces", () => {
     const dag = {
@@ -343,4 +380,156 @@ test("dag validate with no interfaces field on any node validates exactly as bef
 test("evals/fixtures/interfaces-dag.json (happy path: constraints + chained consumes/produces) validates clean", () => {
     const v = validateFile(join(pluginRoot, "evals", "fixtures", "interfaces-dag.json"));
     assert.deepEqual(v, []);
+});
+// --- D7 (high-risk-per-wave) wave numbering must be 0-indexed, matching
+// plan()/lanes() and the CLI's documented `--wave N` (0-indexed) convention.
+// A D7 message naming the wrong wave number sends the user to `sage dag
+// lanes --wave N` with an N that inspects the WRONG wave (off by one) —
+// a real usability bug in a mechanism whose failure mode is aborting a build.
+test("dag validate: D7 high-risk-wave message uses the same 0-indexed wave number as plan()/lanes(), not a 1-indexed one", () => {
+    const risky = (id, deps) => ({
+        id,
+        title: `High risk node ${id}`,
+        role: "backend",
+        depends_on: deps,
+        owns: [`src/${id}/**`],
+        acceptance: ["exits 0 on a clean run"],
+        verify: "npm test",
+        risk: "high",
+    });
+    // Wave 0: n1 (low risk, satisfies "nodes minItems 1" trivially as a root).
+    // Wave 1 (the SECOND wave, index 1): three high-risk nodes depending on n1.
+    const dag = {
+        version: 1,
+        sprint: "01-test",
+        base: "main",
+        nodes: [
+            { ...base.nodes[0], id: "n1", depends_on: [], risk: "low" },
+            risky("n2", ["n1"]),
+            risky("n3", ["n1"]),
+            risky("n4", ["n1"]),
+        ],
+    };
+    const { waves } = plan(dag);
+    // Sanity: the three high-risk nodes really do land together in wave index 1.
+    assert.deepEqual(waves[1], ["n2", "n3", "n4"]);
+    const v = validate(dag);
+    const hit = v.find((x) => x.code === "D7");
+    assert.ok(hit, "expected a D7 violation for 3 high-risk nodes in one wave");
+    // The message must cite wave index 1 (0-indexed, matching plan().waves and
+    // `sage dag lanes --wave 1`) — NOT "wave 2" (the old 1-indexed convention).
+    assert.match(hit.message, /\bwave 1\b/);
+    assert.ok(!/\bwave 2\b/.test(hit.message), `D7 message must not use 1-indexed wave numbering: ${hit.message}`);
+});
+// --- interface-duplicate must be about ambiguous ownership between DISTINCT
+// nodes, not a single node's own array repeating an identifier -----------
+test("dag validate: a single node repeating the same identifier twice in its own produces array is not misreported as multi-node interface-duplicate", () => {
+    const dag = {
+        ...base,
+        nodes: [
+            { ...base.nodes[0], depends_on: [], interfaces: { produces: ["auth.verifyToken", "auth.verifyToken"] } },
+            { ...base.nodes[1], depends_on: [] },
+        ],
+    };
+    const v = validate(dag);
+    const hit = v.find((x) => x.code === "interface-duplicate");
+    assert.ok(!hit, `a single node's own duplicate produces entry must not be reported as "produced by multiple nodes": ${hit?.message}`);
+});
+// --- interface-order: diamond dependency (n1 -> n2,n3 -> n4) -------------
+test("dag validate: interface-order across a diamond — n4 depends on n1 via two paths (n2 and n3) and may consume what n1 produces", () => {
+    const node = (id, deps, extra = {}) => ({
+        ...base.nodes[1],
+        id,
+        depends_on: deps,
+        ...extra,
+    });
+    const dag = {
+        ...base,
+        nodes: [
+            node("n1", [], { interfaces: { produces: ["auth.verifyToken"] } }),
+            node("n2", ["n1"]),
+            node("n3", ["n1"]),
+            node("n4", ["n2", "n3"], { interfaces: { consumes: ["auth.verifyToken"] } }),
+        ],
+    };
+    const v = validate(dag);
+    assert.ok(!v.some((x) => x.code.startsWith("interface-")), JSON.stringify(v));
+});
+// --- interface-order: a long chain (n1 -> n2 -> ... -> n6) ---------------
+test("dag validate: interface-order across a five-hop chain still resolves", () => {
+    const node = (id, deps, extra = {}) => ({
+        ...base.nodes[1],
+        id,
+        depends_on: deps,
+        ...extra,
+    });
+    const dag = {
+        ...base,
+        nodes: [
+            node("n1", [], { interfaces: { produces: ["auth.verifyToken"] } }),
+            node("n2", ["n1"]),
+            node("n3", ["n2"]),
+            node("n4", ["n3"]),
+            node("n5", ["n4"]),
+            node("n6", ["n5"], { interfaces: { consumes: ["auth.verifyToken"] } }),
+        ],
+    };
+    const v = validate(dag);
+    assert.ok(!v.some((x) => x.code.startsWith("interface-")), JSON.stringify(v));
+});
+// --- interface-order: a producer that depends on ITS consumer (reverse
+// edge) must never let the consumer slip past the order check ------------
+test("dag validate: interface-order rejects a producer that depends on its own consumer (reverse edge), it does not satisfy the order requirement", () => {
+    // n2 consumes what n1 produces, but the edge runs the wrong way: n1
+    // depends on n2 (so n2 is built first) instead of n2 depending on n1.
+    const dag = {
+        ...base,
+        nodes: [
+            { ...base.nodes[0], id: "n1", depends_on: ["n2"], interfaces: { produces: ["auth.verifyToken"] } },
+            { ...base.nodes[1], id: "n2", depends_on: [], interfaces: { consumes: ["auth.verifyToken"] } },
+        ],
+    };
+    const v = validate(dag);
+    const hit = v.find((x) => x.code === "interface-order");
+    assert.ok(hit, "n2 does not transitively depend on n1 (the edge runs the other way) — must be flagged");
+});
+// --- interface identifiers are matched by exact string equality: case and
+// surrounding whitespace are NOT normalized, so a mismatch is explicitly
+// rejected (interface-unproduced) rather than silently treated as a match.
+test("dag validate: interface identifier matching is case-sensitive — a differently-cased consume is reported unproduced, not silently matched", () => {
+    const dag = {
+        ...base,
+        nodes: [
+            { ...base.nodes[0], depends_on: [], interfaces: { produces: ["auth.verifyToken"] } },
+            { ...base.nodes[1], depends_on: ["n1"], interfaces: { consumes: ["Auth.verifyToken"] } },
+        ],
+    };
+    const v = validate(dag);
+    assert.ok(v.some((x) => x.code === "interface-unproduced"), "differently-cased identifiers must not silently match");
+});
+test("dag validate: interface identifier matching is whitespace-sensitive — a trailing-space consume is reported unproduced, not silently matched", () => {
+    const dag = {
+        ...base,
+        nodes: [
+            { ...base.nodes[0], depends_on: [], interfaces: { produces: ["auth.verifyToken"] } },
+            { ...base.nodes[1], depends_on: ["n1"], interfaces: { consumes: ["auth.verifyToken "] } },
+        ],
+    };
+    const v = validate(dag);
+    assert.ok(v.some((x) => x.code === "interface-unproduced"), "trailing-whitespace identifiers must not silently match");
+});
+// --- validate() must terminate (no hang / stack overflow) on a cyclic DAG,
+// even though the interface rules run in the same pass as the cycle check.
+test("dag validate: terminates cleanly on a cyclic DAG while still running the interface-order check (no hang, no crash)", () => {
+    const dag = {
+        ...base,
+        nodes: [
+            { ...base.nodes[0], id: "n1", depends_on: ["n2"], interfaces: { produces: ["auth.verifyToken"] } },
+            { ...base.nodes[1], id: "n2", depends_on: ["n1"], interfaces: { consumes: ["auth.verifyToken"] } },
+        ],
+    };
+    const start = Date.now();
+    const v = validate(dag);
+    assert.ok(Date.now() - start < 2000, "validate() must return quickly on a cyclic DAG, not hang");
+    assert.ok(v.some((x) => x.code === "D1" && x.message.includes("cycle")), "the cycle itself must still be reported");
 });

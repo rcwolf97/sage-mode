@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { consult, extractModelReceipt, recordLaneCDispatch } from "../lib/consult/index.js";
+import { consult, extractModelReceipt, recordLaneCDispatch, assertTrusted } from "../lib/consult/index.js";
 import { list as listEgress, verify as verifyEgress, egressPath } from "../lib/egress/index.js";
 import { redact } from "../lib/redact/index.js";
 import { sha256 } from "../lib/util.js";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "sage-consult-"));
+}
+
+// assertTrusted()/consult() resolve the user-level ~/.sage/config.json
+// through process.env.HOME (see lib/util.ts's homeDir()). Redirecting it for
+// the duration of a call isolates these tests from the real ~/.sage.
+function withHome<T>(dir: string, fn: () => T): T {
+  const prev = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.HOME;
+    else process.env.HOME = prev;
+  }
 }
 
 test("consult degrades with exit 3 when claude is absent or untrusted handling still returns a result", () => {
@@ -95,6 +109,64 @@ test("consult redacts the prompt before it is ever handed to the claude subproce
   }
 });
 
+// --- schema file content must be redacted too: it is spawned straight into
+// the args handed to the `claude` subprocess, the same as the prompt is ---
+
+// A fake `claude` executable that records exactly the argv it was invoked
+// with (so the test can inspect what --json-schema actually carried) and
+// returns just enough of a real response envelope for consult() to parse
+// cleanly.
+function installFakeClaude(): { binDir: string; capturedArgsFile: string } {
+  const binDir = mkdtempSync(join(tmpdir(), "sage-fakebin-"));
+  const capturedArgsFile = join(binDir, "captured-args.json");
+  const script = [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    "if (args[0] === '--version') { process.stdout.write('1.0.0\\n'); process.exit(0); }",
+    `fs.writeFileSync(${JSON.stringify(capturedArgsFile)}, JSON.stringify(args));`,
+    "process.stdout.write(JSON.stringify({ session_id: 's1', total_cost_usd: 0, result: 'ok', modelUsage: { 'claude-sonnet-5': {} } }));",
+  ].join("\n");
+  const binPath = join(binDir, "claude");
+  writeFileSync(binPath, script);
+  chmodSync(binPath, 0o755);
+  return { binDir, capturedArgsFile };
+}
+
+function withFakeClaudeOnPath<T>(fn: (paths: { binDir: string; capturedArgsFile: string }) => T): T {
+  const paths = installFakeClaude();
+  const prevPath = process.env.PATH;
+  process.env.PATH = `${paths.binDir}:${prevPath}`;
+  try {
+    return fn(paths);
+  } finally {
+    process.env.PATH = prevPath;
+  }
+}
+
+test("a schema file's content is redacted before it is passed to the claude subprocess via --json-schema, the same as the prompt is", () => {
+  const cwd = tmp();
+  const schemaPath = join(cwd, "schema.json");
+  writeFileSync(
+    schemaPath,
+    JSON.stringify({
+      type: "object",
+      description: "example config with a hardcoded default",
+      properties: { apiKey: { default: "AKIAIOSFODNN7EXAMPLE" } },
+    }),
+  );
+  const capturedArgsFile = withFakeClaudeOnPath((paths) => {
+    consult({ role: "product", prompt: "hello", schema: schemaPath, cwd });
+    return paths.capturedArgsFile;
+  });
+  const args: string[] = JSON.parse(readFileSync(capturedArgsFile, "utf8"));
+  const idx = args.indexOf("--json-schema");
+  assert.ok(idx >= 0, "expected --json-schema to have been passed");
+  const schemaArg = args[idx + 1];
+  assert.ok(!schemaArg.includes("AKIAIOSFODNN7EXAMPLE"), `schema content leaked unredacted: ${schemaArg}`);
+  assert.ok(schemaArg.includes("«REDACTED:aws-key"), schemaArg);
+});
+
 // extractModelReceipt: the Lane B analog of compound-engineering-plugin's
 // extract_model_receipt() / MODEL_ACTUAL="unverified" default — the design
 // this session's competitive-analysis review found sage-mode had zero code
@@ -155,4 +227,58 @@ test("extractModelReceipt: empty string input is unverified, not thrown", () => 
   const receipt = extractModelReceipt("");
   assert.equal(receipt.verified, false);
   assert.deepEqual(receipt.models, []);
+});
+
+// --- assertTrusted(): an existing user config with an explicitly empty
+// trustedRoots list must refuse every root, not silently allow everything ---
+
+test("assertTrusted refuses when ~/.sage/config.json exists but trustedRoots is empty — not the dead branch that silently allows everything", () => {
+  const home = mkdtempSync(join(tmpdir(), "sage-userhome-"));
+  mkdirSync(join(home, ".sage"), { recursive: true });
+  writeFileSync(join(home, ".sage", "config.json"), JSON.stringify({ trustedRoots: [] }));
+  const cwd = tmp();
+  withHome(home, () => {
+    assert.throws(() => assertTrusted(cwd), /not a trusted root/);
+  });
+});
+
+test("assertTrusted still allows everything when ~/.sage/config.json does not exist at all (first run, before setup writes it)", () => {
+  const home = mkdtempSync(join(tmpdir(), "sage-userhome-"));
+  const cwd = tmp();
+  withHome(home, () => {
+    assert.doesNotThrow(() => assertTrusted(cwd));
+  });
+});
+
+// --- ANTHROPIC_API_KEY inherited-env warning still fires on dispatch ---
+
+test("consult warns on stderr when ANTHROPIC_API_KEY is inherited from the environment, so it doesn't silently route through metered billing", () => {
+  const cwd = tmp();
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-fake-for-test";
+  let captured = "";
+  const origWrite = process.stderr.write.bind(process.stderr);
+  (process.stderr.write as unknown) = (chunk: string, ...rest: unknown[]) => {
+    captured += chunk;
+    return (origWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
+  };
+  try {
+    consult({ role: "product", prompt: "hi", cwd });
+  } finally {
+    process.stderr.write = origWrite;
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevKey;
+  }
+  assert.match(captured, /METERED API BILLING/);
+});
+
+// --- an egress ledger write failure must never break consult() itself ---
+
+test("consult still completes normally when the egress ledger path is unwritable (a file sits where .sage/ needs to be a directory)", () => {
+  const cwd = tmp();
+  writeFileSync(join(cwd, ".sage"), "not a directory — mkdir(.sage) will fail inside record()");
+  assert.doesNotThrow(() => {
+    const r = consult({ role: "product", prompt: "hello despite a broken ledger", cwd });
+    assert.ok(typeof r.ok === "boolean");
+  });
 });

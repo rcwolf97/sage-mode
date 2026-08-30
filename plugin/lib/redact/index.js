@@ -203,7 +203,7 @@ function valueGroupDetector(re, kind) {
         return out;
     };
 }
-const detectAwsSecret = valueGroupDetector(/\b(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\b\s*[:=]\s*(?:"([^"\n]{20,120})"|'([^'\n]{20,120})'|([^\s,;}\]]{20,120}))/g, "aws-secret");
+const detectAwsSecret = valueGroupDetector(/\b(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\b\s*[:=]\s*(?:"((?:\\.|[^"\\\n]){20,120})"|'([^'\n]{20,120})'|([^\s,;}\]]{20,120}))/g, "aws-secret");
 const detectBearerToken = valueGroupDetector(/\bBearer\s+([A-Za-z0-9\-._~+/]{20,}=*)/gi, "bearer-token");
 // Generic `KEY=value` / `"key": "value"` / `key: value` assignment forms,
 // gated on the key name normalizing to something in SECRET_KEY_NAMES.
@@ -212,7 +212,18 @@ function detectAssignments(text, claims) {
     // newline between "key:" and its value, so a YAML mapping key with a
     // nested block value ("config:\n  api_key: ...") can't swallow the next
     // line's real "api_key: value" pair as if it were `config`'s own value.
-    const re = /(["'`]?)([A-Za-z_][A-Za-z0-9_-]*)\1[ \t]*[:=][ \t]*(?:"([^"\n]{1,300})"|'([^'\n]{1,300})'|([^\s,;}\])]{1,300}))/g;
+    //
+    // The unquoted value alternative allows ":" inside the captured value
+    // (a deliberate, narrow choice — some legitimate unquoted values contain
+    // one, e.g. a URL). That means a candidate whose KEY doesn't qualify can
+    // still greedily swallow a *real* "key: value" pair that starts partway
+    // through its own value span (`"note: password: realSecret"` — "note"
+    // is not secret-flavored, but its greedy unquoted-value capture eats
+    // "password:" whole, and re.exec's normal lastIndex advance would then
+    // skip straight past the real pair without ever trying it). Escaped
+    // double-quoted values ((?:\\.|[^"\\\n])) are handled the same way the
+    // JSON-secret case needs.
+    const re = /(["'`]?)([A-Za-z_][A-Za-z0-9_-]*)\1[ \t]*[:=][ \t]*(?:"((?:\\.|[^"\\\n]){1,300})"|'([^'\n]{1,300})'|([^\s,;}\])]{1,300}))/g;
     const out = [];
     let m;
     while ((m = re.exec(text))) {
@@ -220,10 +231,20 @@ function detectAssignments(text, claims) {
         const value = m[3] ?? m[4] ?? m[5];
         if (!key || !value)
             continue;
-        if (!SECRET_KEY_NAMES.has(normalizeKey(key)))
+        if (!SECRET_KEY_NAMES.has(normalizeKey(key)) || value.length < 4) {
+            // This candidate is being discarded (unqualified key, or "non-trivial"
+            // guard). Its greedily-matched value may contain the start of a real
+            // "key: value" pair — rewind lastIndex to where the value began so
+            // that text gets its own chance to match as an independent candidate,
+            // instead of being skipped over by re.exec's normal end-of-match
+            // advance. The rewound offset is always > m.index (the value starts
+            // after at least the one-character key plus the separator), so this
+            // always makes forward progress and cannot loop.
+            const valueOffset = m[0].indexOf(value);
+            if (valueOffset > 0)
+                re.lastIndex = m.index + valueOffset;
             continue;
-        if (value.length < 4)
-            continue; // "non-trivial" per spec
+        }
         const start = text.indexOf(value, m.index);
         if (start < 0)
             continue;
@@ -294,7 +315,16 @@ export function redact(text) {
             out += text.slice(c.start, c.end); // pass an existing placeholder through verbatim
         }
         else {
-            out += placeholder(c.kind, c.end - c.start);
+            const matched = text.slice(c.start, c.end);
+            // A matched span can itself contain newlines (a PEM private-key block
+            // is the one multi-line detector). Collapsing it to a single-line
+            // placeholder would shift every subsequent line's number, silently
+            // breaking any `path:line` citation a downstream reviewer makes
+            // against the redacted payload. Emit the same number of newlines the
+            // original span contained so total line count — and every later
+            // line's number — is preserved exactly.
+            const newlines = (matched.match(/\n/g) || []).length;
+            out += placeholder(c.kind, c.end - c.start) + "\n".repeat(newlines);
             kinds[c.kind] = (kinds[c.kind] || 0) + 1;
         }
         cursor = c.end;

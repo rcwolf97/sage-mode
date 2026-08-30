@@ -189,7 +189,7 @@ export function toJsonl(findings: Finding[]): string {
   return findings.map((f) => JSON.stringify(f)).join("\n") + (findings.length ? "\n" : "");
 }
 
-export function dedup(findings: Finding[]): Finding[] {
+export function dedup(findings: Finding[]): GatedFindings {
   const gated = gate(findings);
   const groups = new Map<string, Finding[]>();
   for (const f of gated) {
@@ -214,7 +214,14 @@ export function dedup(findings: Finding[]): Finding[] {
     if (group.some((g) => g.cannot_verify)) keep.cannot_verify = true;
     out.push(keep);
   }
-  return out;
+  // dedup() calls gate() internally purely to key/merge only well-formed
+  // rows — but gate() already computed which rows were rejected, and that
+  // information must not evaporate here. Without this, a caller that goes
+  // through dedup() (rather than gate()) gets a silently-shorter output with
+  // no way to tell "nothing was wrong" apart from "N rows were malformed and
+  // got dropped" — precisely the clean-bill-of-health failure mode gate()'s
+  // `.rejected` exists to prevent (see the block comment above gate()).
+  return Object.assign(out, { rejected: gated.rejected });
 }
 
 export function classifyBand(confidence: number): "show" | "caveat" | "appendix" | "suppress" {

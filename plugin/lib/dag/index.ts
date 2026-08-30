@@ -45,12 +45,50 @@ const ID = /^n[0-9]+$/;
 const SPRINT = /^[0-9]{2}(-[a-z0-9-]+)?$/;
 const BAD_ACCEPT = /\b(works|correctly|properly|as expected)\b/i;
 
+// schemas/dag.schema.json declares `additionalProperties: false` at every
+// object level (the dag itself, each node, and interfaces) — but nothing
+// here actually enforced it: validate() only ever read the fields it knew
+// about and silently ignored the rest. That's a real false-PASS path: a
+// typo like `dependsOn` instead of `depends_on` isn't a parse error, it's
+// just an object with an extra key and a *missing* real one — the node
+// quietly gets no dependencies at all, D1/D2/interface-order all reason
+// about the wrong wave structure, and validate() reports a clean bill of
+// health. Mirrors the schema's property lists exactly (kept next to it so
+// the two can't drift silently the way finding.schema.json's constraints
+// once did before gate() was hardened to enforce them — see lib/review's
+// validateFindingRow for the precedent).
+const DAG_KEYS = new Set(["version", "sprint", "base", "profile", "nodes", "constraints"]);
+const NODE_KEYS = new Set([
+  "id",
+  "title",
+  "role",
+  "depends_on",
+  "owns",
+  "reads",
+  "acceptance",
+  "verify",
+  "risk",
+  "design",
+  "model",
+  "notes",
+  "interfaces",
+]);
+const INTERFACE_KEYS = new Set(["consumes", "produces"]);
+
+function unknownKeys(obj: object, known: Set<string>): string[] {
+  return Object.keys(obj).filter((k) => !known.has(k));
+}
+
 export function loadDag(path: string): Dag {
   return readJson<Dag>(path);
 }
 
 export function validate(dag: Dag): Violation[] {
   const v: Violation[] = [];
+  if (dag && typeof dag === "object") {
+    const extra = unknownKeys(dag, DAG_KEYS);
+    if (extra.length) v.push({ code: "schema", message: `unknown top-level field(s): ${extra.join(", ")}` });
+  }
   if (dag.version !== 1) v.push({ code: "schema", message: "version must be 1" });
   if (!SPRINT.test(dag.sprint || "")) v.push({ code: "schema", message: `sprint id invalid: ${dag.sprint}` });
   if (!dag.base) v.push({ code: "schema", message: "base is required" });
@@ -74,6 +112,22 @@ export function validate(dag: Dag): Violation[] {
 
   const ids = new Set<string>();
   for (const n of dag.nodes || []) {
+    if (n && typeof n === "object") {
+      const extraNode = unknownKeys(n, NODE_KEYS);
+      if (extraNode.length) {
+        v.push({ code: "schema", message: `unknown field(s) on ${n.id}: ${extraNode.join(", ")}`, nodes: [n.id] });
+      }
+      if (n.interfaces && typeof n.interfaces === "object") {
+        const extraIface = unknownKeys(n.interfaces, INTERFACE_KEYS);
+        if (extraIface.length) {
+          v.push({
+            code: "schema",
+            message: `unknown field(s) in interfaces on ${n.id}: ${extraIface.join(", ")}`,
+            nodes: [n.id],
+          });
+        }
+      }
+    }
     if (!ID.test(n.id)) v.push({ code: "schema", message: `bad id ${n.id}` });
     if (ids.has(n.id)) v.push({ code: "schema", message: `duplicate id ${n.id}` });
     ids.add(n.id);
@@ -121,16 +175,33 @@ export function validate(dag: Dag): Violation[] {
   // same depends_on adjacency findCycle walks, so an "order" violation means
   // exactly what it says — the consuming node has no dependency path (direct
   // or transitive) to a node that produces the identifier it needs.
-  const producers = new Map<string, string[]>();
+  //
+  // Matching is exact string equality — deliberately not case- or
+  // whitespace-normalized. `Auth.verifyToken`, `auth.verifyToken`, and
+  // `auth.verifyToken ` are three different identifiers as far as this is
+  // concerned: a mismatch is a real interface-unproduced rejection, never a
+  // silent match. This is the "reject" side of "either normalize or reject,
+  // explicitly" — chosen over normalizing because normalization would mean
+  // picking one of several plausible canonicalizations (case-fold? trim?
+  // both?) that nothing else in the dag.json format establishes, and
+  // guessing wrong there would silently paper over a genuine typo instead
+  // of surfacing it.
+  // Keyed by identifier -> the set of DISTINCT node ids that produce it. A
+  // node listing the same identifier twice in its own `produces` array (a
+  // data-entry duplicate, not an ownership conflict) must not inflate this
+  // to "produced by multiple nodes" — only genuinely different producer
+  // node ids make ownership ambiguous.
+  const producers = new Map<string, Set<string>>();
   for (const n of dag.nodes || []) {
     for (const p of n.interfaces?.produces || []) {
       if (typeof p !== "string" || !p.length) continue;
-      if (!producers.has(p)) producers.set(p, []);
-      producers.get(p)!.push(n.id);
+      if (!producers.has(p)) producers.set(p, new Set());
+      producers.get(p)!.add(n.id);
     }
   }
-  for (const [ident, producerIds] of producers) {
-    if (producerIds.length > 1) {
+  for (const [ident, producerIdSet] of producers) {
+    if (producerIdSet.size > 1) {
+      const producerIds = [...producerIdSet];
       v.push({
         code: "interface-duplicate",
         message: `identifier ${ident} is produced by multiple nodes: ${producerIds.join(", ")} — ambiguous ownership`,
@@ -141,7 +212,7 @@ export function validate(dag: Dag): Violation[] {
   for (const n of dag.nodes || []) {
     for (const c of n.interfaces?.consumes || []) {
       if (typeof c !== "string" || !c.length) continue;
-      const producerIds = producers.get(c) || [];
+      const producerIds = [...(producers.get(c) || [])];
       if (producerIds.length === 0) {
         v.push({ code: "interface-unproduced", message: `${n.id} consumes ${c} but no node produces it`, nodes: [n.id] });
         continue;
@@ -169,7 +240,7 @@ export function validate(dag: Dag): Violation[] {
     if (high.length > 2) {
       v.push({
         code: "D7",
-        message: `wave ${i + 1} schedules ${high.length} high-risk nodes`,
+        message: `wave ${i} schedules ${high.length} high-risk nodes`,
         nodes: high,
       });
     }

@@ -489,6 +489,78 @@ test("--purge-user-config removes only this project from trustedRoots, never the
     assert.equal(cfgAfter.sageHome, cfgBefore.sageHome, "unrelated config keys must be preserved, not dropped");
     assert.equal(cfgAfter.version, cfgBefore.version);
 });
+// --- Bug 1: a fresh repo must report ok:true with gaps, not ok:false ------
+//
+// The health-check contract this implements (deliberately mirroring
+// compound-engineering's): an absence is never a failure, only a gap. A
+// health check that fails on a repo that has simply never run `sage setup`
+// yet is the worst possible first experience for a new engineer.
+test("setup --check on a fresh, never-set-up repo reports ok:true with gaps listed, not ok:false", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const userHome = isolatedUserHome();
+    const report = withHome(userHome, () => checkHealth({ project: dir }));
+    assert.equal(report.ok, true, "a fresh repo must never report ok:false — nothing is broken, it's just not set up yet");
+    assert.ok(report.gaps.length > 0, "a fresh repo should still list what's missing, as gaps");
+    assert.deepEqual(report.problems, [], "no gap on a fresh repo should count as a genuine problem");
+    // The specific gaps this fresh-repo scenario is documented to raise:
+    assert.ok(report.gaps.some((g) => g.includes(".sage/") && g.includes("gitignored")));
+    assert.ok(report.gaps.some((g) => g.includes("no project .sage/config.json")));
+});
+test("post-setup repo with .gitignore reverted (install manifest exists) reports ok:false — this really is broken", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    // Simulate the user (or a careless merge) reverting .gitignore after setup
+    // already ran once — the install manifest is still there, so this is no
+    // longer "not set up yet," it's a real regression that will silently break
+    // evidence forever (see lib/evidence's checkSageIgnored).
+    writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
+    const report = withHome(userHome, () => checkHealth({ project: dir }));
+    assert.equal(report.ok, false, "an install that has already run, with .gitignore reverted, must be reported broken");
+    assert.ok(report.problems.some((p) => p.includes(".sage/") && p.includes("gitignored")));
+});
+test("a project config that exists but is malformed JSON is reported broken, not just a gap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const userHome = isolatedUserHome();
+    withHome(userHome, () => setup({ project: dir, sageHome: home }));
+    writeFileSync(join(dir, ".sage", "config.json"), "{ not json at all");
+    const report = withHome(userHome, () => checkHealth({ project: dir }));
+    assert.equal(report.ok, false);
+    assert.ok(report.problems.some((p) => p.includes("not valid JSON")));
+});
+// --- Bug 2: HOME resolving to the project root must never silently clobber
+// the project config with the user config --------------------------------
+test("setup refuses, before writing anything, when HOME resolves to the project root itself", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const home = makeSageHome();
+    const beforeProject = snapshotTree(dir);
+    let threw;
+    try {
+        withHome(dir, () => setup({ project: dir, sageHome: home }));
+    }
+    catch (e) {
+        threw = e;
+    }
+    assert.ok(threw instanceof Error, "setup() must refuse rather than silently proceed");
+    assert.match(threw.message, /HOME/);
+    assert.match(threw.message, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const afterProject = snapshotTree(dir);
+    assert.deepEqual(beforeProject, afterProject, "a refused setup must not have written anything to the project");
+    assert.ok(!existsSync(join(dir, ".sage")), "no .sage/ directory should have been created");
+});
+test("checkHealth reports the HOME/project collision as broken (ok:false), never silently picking one config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
+    gitInit(dir);
+    const report = withHome(dir, () => checkHealth({ project: dir }));
+    assert.equal(report.ok, false);
+    assert.ok(report.problems.some((p) => p.includes("HOME") || p.toLowerCase().includes("same path")));
+});
 test("a stale manifest hash (as if a prior setup crashed between writing the file and writing the manifest) is treated as owned-modified, never silently rewritten", () => {
     const dir = mkdtempSync(join(tmpdir(), "sage-proj-"));
     gitInit(dir);

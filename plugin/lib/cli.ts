@@ -416,12 +416,29 @@ async function main(argv: string[]): Promise<number> {
       return rejected.length ? 1 : 0;
     }
     if (sub === "dedup") {
+      // dedup() runs its input through gate() internally, so it carries the
+      // same `.rejected` rows gate() would have reported. Surfacing them here
+      // is not optional: `sage review dedup` is a standalone entry point, and
+      // a handler that drops rejects and exits 0 is exactly the clean-bill-of-
+      // health failure the gate mechanism exists to close. Same contract as
+      // `sage review gate` above — rejects are printed, and their presence
+      // alone flips the exit code, however many findings validated cleanly.
       const input = await readStdin();
       const findings = parseJsonl(input);
       const out = dedup(findings);
-      if (json) print(out, true);
-      else process.stdout.write(toJsonl(out));
-      return 0;
+      const rejected = out.rejected ?? [];
+      if (json) {
+        print({ findings: out, rejected }, true);
+      } else {
+        const body = toJsonl(out);
+        process.stdout.write(body);
+        if (rejected.length) {
+          if (body && !body.endsWith("\n")) process.stdout.write("\n");
+          process.stdout.write(`REJECTED (${rejected.length})\n`);
+          for (const r of rejected) process.stdout.write(`  - ${r.reason}\n`);
+        }
+      }
+      return rejected.length ? 1 : 0;
     }
     if (sub === "scope") {
       const base = opt(rest, "base");

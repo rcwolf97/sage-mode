@@ -42,7 +42,7 @@
 // exactly how to turn each permission off — a security conversation this
 // answers with a command, not a promise.
 
-import { existsSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, appendFileSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { sha256, projectSageDir, sageUserDir, readJson } from "../util.js";
 
@@ -113,34 +113,90 @@ function readRowsForgiving(path: string): EgressRow[] {
     .filter((r): r is EgressRow => !!r);
 }
 
+// record() is read-modify-append: read the ledger's last row, compute the
+// next seq/hash from it, then append. Two `sage` processes calling record()
+// against the same ledger at the same moment (e.g. two lanes dispatching
+// concurrently) can both read the same "last row" before either has
+// appended, then both append a row claiming the same seq/prev_hash — a
+// silent, non-malicious corruption that verify() then reports as a broken
+// chain, indistinguishable from actual tampering. A simple exclusive
+// lockfile around the critical section serializes same-machine writers so
+// that race can't happen. Bounded spin-wait (not fully blocking) with a
+// stale-lock break so a process that died holding the lock can't wedge the
+// ledger shut forever.
+function withLedgerLock<T>(dir: string, fn: () => T): T {
+  const lockPath = join(dir, "egress.jsonl.lock");
+  const staleAfterMs = 5000;
+  const deadline = Date.now() + staleAfterMs;
+  let fd: number | null = null;
+  while (fd === null) {
+    try {
+      fd = openSync(lockPath, "wx");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (Date.now() > deadline) {
+        // Stale lock (holder crashed without cleaning up): break it and
+        // retry rather than wedging every future record() call forever.
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          /* another process already broke/cleared it — just retry */
+        }
+        continue;
+      }
+      sleepSyncMs(5);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+// A true synchronous sleep — record() must stay synchronous (it's called
+// from synchronous CLI code paths), so this can't be a Promise/setTimeout.
+// Atomics.wait on a throwaway SharedArrayBuffer blocks this thread only,
+// without spinning the CPU, and is available in Node without special flags.
+function sleepSyncMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 // Append one receipt row, chaining it to whatever the ledger's current last
 // row is (or to GENESIS_HASH if the ledger is missing or empty). Safe to
 // call against a project that has never had a `.sage` directory before.
 export function record(root: string, entry: EgressEntry): EgressRow {
   const dir = projectSageDir(root);
   mkdirSync(dir, { recursive: true });
-  const path = egressPath(root);
-  const rows = readRowsForgiving(path);
-  const last = rows.at(-1);
-  const seq = (last?.seq ?? 0) + 1;
-  const prev_hash = last?.hash ?? GENESIS_HASH;
-  const rowSansHash: Omit<EgressRow, "hash"> = {
-    seq,
-    ts: new Date().toISOString(),
-    sink: entry.sink,
-    model: entry.model,
-    lane: entry.lane,
-    sprint: entry.sprint,
-    node: entry.node,
-    bytes: entry.bytes,
-    content_sha256: entry.content_sha256,
-    redactions: entry.redactions,
-    prev_hash,
-  };
-  const hash = sha256(prev_hash + canonicalJson(rowSansHash));
-  const row: EgressRow = { ...rowSansHash, hash };
-  appendFileSync(path, JSON.stringify(row) + "\n");
-  return row;
+  return withLedgerLock(dir, () => {
+    const path = egressPath(root);
+    const rows = readRowsForgiving(path);
+    const last = rows.at(-1);
+    const seq = (last?.seq ?? 0) + 1;
+    const prev_hash = last?.hash ?? GENESIS_HASH;
+    const rowSansHash: Omit<EgressRow, "hash"> = {
+      seq,
+      ts: new Date().toISOString(),
+      sink: entry.sink,
+      model: entry.model,
+      lane: entry.lane,
+      sprint: entry.sprint,
+      node: entry.node,
+      bytes: entry.bytes,
+      content_sha256: entry.content_sha256,
+      redactions: entry.redactions,
+      prev_hash,
+    };
+    const hash = sha256(prev_hash + canonicalJson(rowSansHash));
+    const row: EgressRow = { ...rowSansHash, hash };
+    appendFileSync(path, JSON.stringify(row) + "\n");
+    return row;
+  });
 }
 
 export function list(root: string, opts?: { sprint?: string }): EgressRow[] {
@@ -212,14 +268,35 @@ const LANE_BY_MODEL_PREFIX: Array<{ prefix: RegExp; lane: string; sink: string }
   { prefix: /^gemini/i, lane: "C", sink: "google" },
 ];
 
+// POSIX single-quote a string for safe literal use as one shell word: close
+// the quote, insert an escaped quote, reopen. Safe against every shell
+// metacharacter (backticks, $, ;, newlines, embedded quotes included) —
+// nothing inside a single-quoted string is interpreted by the shell.
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 function revokeCommandFor(role: string): string {
   // A literal, copy-pasteable command run from the project root that flips
   // this one lane to a non-egressing model, in place, in the same config
   // file `sage setup` wrote. No new CLI surface required to run it.
+  //
+  // `role` comes from `.sage/config.json`'s `lanes` object keys — a
+  // project-level file that can be committed to, and shared from, a repo
+  // this process did not author (the exact "untrusted input" this whole
+  // module exists to be honest about). It must never be interpolated
+  // directly into the JS source string handed to `node -e`: a role name
+  // like `x']='local';require('child_process').exec(...)//` would close
+  // the string literal early and inject arbitrary code into a command this
+  // module explicitly advertises as safe to copy-paste and run. Instead the
+  // role is passed as a separate, shell-quoted positional argument after
+  // `--`, and the static `-e` script reads it from process.argv[1] — the
+  // role string is never parsed as code, by the shell or by node, no matter
+  // what it contains.
   return (
     `node -e "const fs=require('node:fs');const p='.sage/config.json';` +
-    `const c=JSON.parse(fs.readFileSync(p,'utf8'));c.lanes['${role}']='local';` +
-    `fs.writeFileSync(p,JSON.stringify(c,null,2)+'\\n');"`
+    `const c=JSON.parse(fs.readFileSync(p,'utf8'));c.lanes[process.argv[1]]='local';` +
+    `fs.writeFileSync(p,JSON.stringify(c,null,2)+'\\n');" -- ${shellQuote(role)}`
   );
 }
 

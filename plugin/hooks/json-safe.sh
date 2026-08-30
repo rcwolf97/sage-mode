@@ -191,8 +191,32 @@ _sage_host() {
 # JSON, on a strictly-POSIX toolchain (awk, present per hooks/tests/run.sh's
 # own NOBIN allowlist) that works identically under dash and bash.
 _json_escape_fallback() {
+  # awk's line-oriented reconstruction below (split on "\n" via NR, rejoin
+  # with a literal "\n" escape between records) is correct for every
+  # newline EXCEPT one or more trailing newlines: awk's default record
+  # splitting treats a trailing separator as a terminator, not as
+  # introducing a further empty final record, so `printf 'a\n'` reads as a
+  # single one-line record "a" with no trace that a newline followed it —
+  # the trailing newline is silently dropped from the output instead of
+  # being escaped. An adversarial test proved this with a deny/ask message
+  # ending in "\n": the emitted JSON stayed valid, but the message text was
+  # silently truncated. Strip and count trailing newlines in the shell
+  # first (POSIX suffix removal on a literal, not a glob, so this is exact,
+  # not pattern-matching), hand the now-non-newline-terminated remainder to
+  # awk for the interior-newline reconstruction it already does correctly,
+  # then re-append one "\n" escape per newline that was stripped.
+  _jef_nl='
+'
+  _jef_body=$1
+  _jef_trail=""
+  while :; do
+    case $_jef_body in
+      *"$_jef_nl") _jef_body=${_jef_body%"$_jef_nl"}; _jef_trail="${_jef_trail}\\n" ;;
+      *) break ;;
+    esac
+  done
   _jef_tab=$(printf '\t')
-  printf '%s' "$1" | awk -v tab="$_jef_tab" '
+  printf '%s' "$_jef_body" | awk -v tab="$_jef_tab" '
     BEGIN { ORS = "" }
     {
       line = $0
@@ -202,6 +226,7 @@ _json_escape_fallback() {
       if (NR > 1) printf "\\n"
       printf "%s", line
     }'
+  printf '%s' "$_jef_trail"
 }
 
 # _sage_hook_event [default]

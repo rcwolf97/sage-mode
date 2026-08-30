@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseLedger, next, saveLedger, type Ledger } from "../lib/board/index.js";
@@ -293,6 +293,32 @@ test("evaluateCircuitBreakerForSprint scores a real ledger the same way evaluate
   const result = evaluateCircuitBreakerForSprint("04", root);
   assert.equal(result.score, 0);
   assert.equal(result.stopAndAsk, false);
+});
+
+// -----------------------------------------------------------------------
+// A ledger.md that EXISTS but is empty/truncated/unparseable (e.g. a crash
+// mid-write, a concurrent-write race) is a different failure mode than a
+// missing ledger, and existsSync alone cannot tell them apart. Silently
+// parsing garbage into a plausible-looking-but-empty Ledger — rather than
+// treating it as "no usable ledger" the same way a missing file is — is a
+// real false-PASS risk here specifically: evaluateCircuitBreakerForSprint
+// would score a corrupted ledger as a clean wtf:0/stopAndAsk:false instead
+// of raising the same loud LedgerNotFoundError a missing ledger gets.
+// -----------------------------------------------------------------------
+test("loadLedgerOrThrow throws LedgerNotFoundError (not a silently-empty Ledger) when ledger.md exists but is empty", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-ledger-empty-"));
+  const p = ledgerPath("05", root);
+  mkdirSync(join(p, ".."), { recursive: true });
+  writeFileSync(p, "");
+  assert.throws(() => loadLedgerOrThrow("05", root), LedgerNotFoundError);
+});
+
+test("evaluateCircuitBreakerForSprint throws (not a fabricated clean score) when ledger.md exists but is unparseable garbage", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-wtf-garbage-"));
+  const p = ledgerPath("06", root);
+  mkdirSync(join(p, ".."), { recursive: true });
+  writeFileSync(p, Buffer.from([0, 1, 2, 255, 254, 0x80, 0x81]));
+  assert.throws(() => evaluateCircuitBreakerForSprint("06", root), LedgerNotFoundError);
 });
 
 test("deriveWtfSignals: allRemainingFindingsLow is false, not true, when findings.jsonl is simply absent", () => {
