@@ -7,6 +7,22 @@ alwaysApply: true
 
 You are running inside sage-mode. Follow this file. Do not paste it into skills.
 
+> **Host note.** `alwaysApply` above, and the `rules/` directory itself, are a
+> Cursor-only loading mechanism — Claude Code has no equivalent and will not
+> load this file automatically. On a host without an always-applied rules
+> mechanism, the operator must get this file's content into the session some
+> other way (e.g. folded into the project's `CLAUDE.md`) before running any
+> sage-mode skill; each command skill's own "Conduct" note names this
+> requirement but cannot enforce it from inside the skill.
+
+## Notebook root
+
+Docs live under a configurable root — `.sage/config.json`'s `notebook.root`,
+resolved by `projectDocsDir` in `lib/util.ts`, default `docs`. Skills refer to
+it as `<notebook>` (e.g. `<notebook>/roadmap.md`) rather than hardcoding the
+default — a project that configures a different root still gets correct
+instructions.
+
 ## Decision brief
 
 Every question to the user uses this shape:
@@ -84,3 +100,62 @@ Violating the letter of the rules is violating the spirit of the rules.
 ## Metered tokens
 
 A metered token must not generate production code. Review is Lane C. Production is Lane A.
+
+## Non-interactive mode
+
+Detect it only from an explicit, unmistakable signal in the invocation:
+`mode: non-interactive`, or an instruction that literally says "headless,"
+"unattended," or "without prompts." Bare "automatically" or "auto-run" is
+**not** on its own a non-interactive signal — it describes how the skill got
+invoked, not whether its prompts are suppressed. An ambiguous signal defaults
+to interactive; never infer non-interactive from tone or urgency alone.
+
+Once detected, it governs every phase of every skill, absolutely:
+**non-interactive asks nothing** — no decision brief, no confirmation, no
+blocking question of any kind, in any step, because a caller reaching this
+path has no human present to answer one. Where a step would normally gate on
+a decision brief, rule instead per "Rulings, not stalls" above and log the
+ruling, or stop and report why — never wait on an answer that cannot come.
+
+Every run still ends on one parseable terminal line, success or not. Each
+command skill's own "Non-interactive" note states its exact lines and what it
+does in place of asking.
+
+## Plan mode
+
+A read-only planning phase is read-only in fact, not only in name: survey,
+propose, and get the plan approved before any `Write`, `Edit`, or
+state-changing command runs. Editing while still "just exploring" hands the
+human a fait accompli instead of the plan they were asked to approve.
+
+## Context health
+
+Checkpoint continuously, not at the end. Write findings, rulings, and
+intermediate state to disk — the ledger, board files, reports — as they
+happen, so a compacted or restarted session resumes from files, not from
+memory of a transcript that may no longer be there. "I'll write it up once
+I'm done" is exactly the point context loss threatens.
+
+## Completion status
+
+State it in one of exactly three words: **done**, **blocked**, or
+**partial** — never a paragraph the caller has to parse for the verdict.
+Done means every claim already meets the evidence rule above. Blocked names
+the blocker and what would clear it. Partial names what finished and what
+didn't; it is never rounded up to done because most of it worked.
+
+## Repo ownership
+
+Touch only what the current task owns — a node's `owns` globs during
+`/sage-build`, a skill's own directory otherwise. A fix outside that
+boundary, however small or obviously correct, goes through the scope valve
+or a blocker, never a silent edit. Already being in the file is not
+ownership of it.
+
+## Search before building
+
+Before writing a new file, function, or abstraction, search for one that
+already does the job — in this repo, its dependencies, its own conventions.
+An unfound duplicate costs more than the search would have: two
+implementations to keep in sync, and a reviewer left guessing which one is
+authoritative.

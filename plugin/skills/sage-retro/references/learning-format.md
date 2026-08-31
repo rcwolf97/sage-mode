@@ -1,8 +1,9 @@
 # Learning record format and the update-vs-new-file decision
 
-**Trigger:** load this while drafting a learning in step 3 of `SKILL.md`, or
-whenever a `recall dedup` result is borderline and it's unclear whether it
-should update an existing record or become a new file.
+**Trigger:** load this while drafting a learning in step 3 of `SKILL.md`, re-
+checking a sampled learning for staleness in step 4, or whenever a `recall
+dedup` result is borderline and it's unclear whether it should update an
+existing record or become a new file.
 
 ## Full shape
 
@@ -16,6 +17,7 @@ applies_when: "handling third-party webhooks with at-least-once delivery"
 severity: high
 sprint: "03"
 created: 2026-08-21
+last_confirmed: "03"
 ---
 
 ## What happened
@@ -29,6 +31,43 @@ doing right now," which a `title` alone cannot — a title tells you what
 happened, `applies_when` tells you when to go looking for it. Write it as a
 situation, not a summary: "handling third-party webhooks with at-least-once
 delivery," not "Stripe retry bug."
+
+## `last_confirmed` and `status: superseded`
+
+`created` and `last_confirmed` answer two different questions and neither
+one substitutes for the other. `created` is fixed at write time and never
+moves again — it's "when was this first observed." `last_confirmed` moves
+every time step 4 of `SKILL.md` samples this learning and confirms it still
+holds — it's "as of when was this last checked against reality," which is
+the field step 4 actually sorts on to decide what's oldest and most overdue
+for a look. A freshly-drafted learning starts with `last_confirmed` equal to
+its own `sprint` — it hasn't been re-confirmed yet, only asserted once — and
+that's also what makes it sort as maximally stale until step 4 eventually
+samples it for the first time.
+
+When step 4 finds a sampled learning no longer holds, the file is never
+deleted and its body is never wiped — mirroring the roadmap's "amend, don't
+delete" rule in step 5, reusing the same `status: superseded` value the
+roadmap's Status column already uses rather than inventing a learning-
+specific term for the same idea. Concretely:
+
+- Add `status: superseded` to the frontmatter. Every other field — `created`,
+  `sprint`, `tags`, `applies_when` — stays as originally written; this is an
+  addition, not a rewrite of the record's history.
+- Directly below the frontmatter, before `## What happened`, add one line:
+  `> **Superseded (sprint <NN>):** <what changed, and what's true now
+  instead>` — e.g. `> **Superseded (sprint 14):** Service Y shipped native
+  support for Z in 2026-07; the workaround below is no longer required.`
+- The original four body sections stay exactly as written underneath. A
+  superseded learning is a record of what was true and why, not a mistake to
+  erase — the next person who finds it via `recall` should be able to see
+  both what used to hold and why it stopped.
+
+A `status: superseded` learning is still indexed and can still surface in a
+`sage recall` hit — recall doesn't filter on `status`. Treat a hit carrying
+that field as history explaining a past decision, not as current advice to
+act on; the superseded note at the top of the file is what tells you which
+one you're looking at.
 
 ## Worked example: retro run twice on the same problem
 

@@ -63,6 +63,22 @@ output. **Writes:** `CHANGELOG`, version bump, an open PR.
    same breath as "ship," decline that specific part and say why: ship's job
    ends at an open PR.
 
+## Conduct
+
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
+on a host without an always-applied rules mechanism (Claude Code), the
+operator must get its content into the session some other way (e.g. folded
+into the project's `CLAUDE.md`) before running this skill.
+
+## Non-interactive
+
+Nothing here waits on a live decision — a CRITICAL finding with no recorded
+ruling already refuses the PR in interactive mode too, so non-interactivity
+changes nothing about that check; it only means there's no one left to ask
+for the ruling this run needs. Terminal: `Ship complete: PR opened at <url>`
+/ `Ship blocked: unresolved CRITICAL <path:line>` / `Ship blocked: gh
+missing, PR body printed`.
+
 ## Common Rationalizations
 
 | Rationalization | Reality |

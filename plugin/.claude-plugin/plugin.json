@@ -1,0 +1,23 @@
+{
+  "name": "sage-mode",
+  "displayName": "Sage Mode",
+  "description": "An engineering organization you command. Sprint-shaped delivery with specialist agents, adversarial review, and a notebook that remembers.",
+  "version": "1.0.0",
+  "author": { "name": "rcwolf97" },
+  "repository": "https://github.com/rcwolf97/sage-mode",
+  "homepage": "https://github.com/rcwolf97/sage-mode",
+  "license": "MIT",
+  "keywords": [
+    "engineering",
+    "sprint",
+    "review",
+    "agents",
+    "notebook",
+    "claude-code-plugin"
+  ],
+  "skills": "./skills",
+  "agents": "./agents",
+  "commands": "./commands",
+  "hooks": "./hooks/hooks-claude.json",
+  "_comment_no_rules": "Claude Code has no `rules` concept (unlike Cursor's `.cursor-plugin/plugin.json`, which has a `rules` field pointing at rules/sage-conduct.mdc — alwaysApply frontmatter that Cursor loads unconditionally every session). There is no direct Claude Code equivalent field to point at the same file here. rules/sage-conduct.mdc's content (the decision-brief format, evidence/anti-sycophancy/scope-valve conduct rules) still needs to reach Claude Code sessions somehow — e.g. folded into a skill that's always loaded, or into CLAUDE.md — but that redelivery is NOT solved by this manifest; flagged here so it isn't silently dropped. See hooks/README.md's 'Claude Code gaps' section."
+}

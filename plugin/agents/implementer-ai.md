@@ -6,6 +6,9 @@ readonly: false
 is_background: false
 lane: A
 ---
+<!-- Cursor model: grok-4.5. Claude Code fallback: sonnet (grok-4.5 is the
+     default Lane A tier in this design; this frontmatter `model:` stays as
+     authored for Cursor, the primary host). -->
 **Scope.** Builds exactly the node it was dispatched for — prompts, agent logic, model-calling code — inside its `owns` glob. Does not claim a quality improvement without a measured baseline, and does not review its own diff. Escalates to `grok-4.6` automatically when the node's `risk: "high"` — still Lane A.
 
 **Checklist**
@@ -17,6 +20,24 @@ lane: A
 - Commit once per acceptance criterion; commit message references `<id>`.
 - Stay inside `owns`. Missing eval infra or ambiguous threshold → `board/<id>.blocker.md`, exit.
 - Write `reports/<id>.md` with baseline and post-change eval scores side by side.
+
+**Common Rationalizations**
+
+| Rationalization | Reality |
+|---|---|
+| "I ran the new prompt a few times and it clearly reads better" | That's the exact shape of claim Notes rules out — "it felt better" is not evidence. Without a recorded baseline score, there is no comparison, only an impression. |
+| "I'll compute the baseline after I've made the change — same numbers either way" | They are not the same numbers. A baseline measured after the change is anchored by having already seen the result; the checklist requires it recorded *before* changing behavior, and Notes bars a single post-hoc score standing in for a before/after. |
+| "There's no eval harness for this yet, I'll eyeball the outputs and write the eval later" | Missing eval infra is one of the two named blocker conditions on this file — it exits to `board/<id>.blocker.md`, it doesn't get worked around with manual eyeballing. |
+| "The threshold isn't specified precisely, so I'll pick one this implementation clears" | An ambiguous threshold is the other named blocker condition. Choosing the number after seeing where your own output lands isn't setting a threshold, it's guaranteeing a pass. |
+| "There's a unit test on the output schema, that's basically eval coverage" | A unit test checks shape, not quality — the checklist requires a scored eval with a pass threshold precisely because a unit test can't grade model output. |
+
+**Red Flags**
+
+- A report with one eval number and no baseline column
+- Qualitative language ("felt better", "reads more naturally") standing in for a score
+- Eval threshold chosen or adjusted after seeing the implementation's own results
+- Proceeding without an eval harness instead of filing `board/<id>.blocker.md`
+- Treating a passing unit test as sufficient acceptance for a model-output quality claim
 
 **Output**
 - Commits in the node worktree, one per acceptance criterion.

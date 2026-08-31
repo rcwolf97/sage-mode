@@ -5,11 +5,48 @@ export const ROLES = ["frontend", "backend", "data", "infra", "ai", "design"];
 const ID = /^n[0-9]+$/;
 const SPRINT = /^[0-9]{2}(-[a-z0-9-]+)?$/;
 const BAD_ACCEPT = /\b(works|correctly|properly|as expected)\b/i;
+// schemas/dag.schema.json declares `additionalProperties: false` at every
+// object level (the dag itself, each node, and interfaces) — but nothing
+// here actually enforced it: validate() only ever read the fields it knew
+// about and silently ignored the rest. That's a real false-PASS path: a
+// typo like `dependsOn` instead of `depends_on` isn't a parse error, it's
+// just an object with an extra key and a *missing* real one — the node
+// quietly gets no dependencies at all, D1/D2/interface-order all reason
+// about the wrong wave structure, and validate() reports a clean bill of
+// health. Mirrors the schema's property lists exactly (kept next to it so
+// the two can't drift silently the way finding.schema.json's constraints
+// once did before gate() was hardened to enforce them — see lib/review's
+// validateFindingRow for the precedent).
+const DAG_KEYS = new Set(["version", "sprint", "base", "profile", "nodes", "constraints"]);
+const NODE_KEYS = new Set([
+    "id",
+    "title",
+    "role",
+    "depends_on",
+    "owns",
+    "reads",
+    "acceptance",
+    "verify",
+    "risk",
+    "design",
+    "model",
+    "notes",
+    "interfaces",
+]);
+const INTERFACE_KEYS = new Set(["consumes", "produces"]);
+function unknownKeys(obj, known) {
+    return Object.keys(obj).filter((k) => !known.has(k));
+}
 export function loadDag(path) {
     return readJson(path);
 }
 export function validate(dag) {
     const v = [];
+    if (dag && typeof dag === "object") {
+        const extra = unknownKeys(dag, DAG_KEYS);
+        if (extra.length)
+            v.push({ code: "schema", message: `unknown top-level field(s): ${extra.join(", ")}` });
+    }
     if (dag.version !== 1)
         v.push({ code: "schema", message: "version must be 1" });
     if (!SPRINT.test(dag.sprint || ""))
@@ -20,8 +57,41 @@ export function validate(dag) {
         v.push({ code: "schema", message: "nodes minItems 1" });
     if (dag.nodes?.length > 60)
         v.push({ code: "schema", message: "nodes maxItems 60" });
+    if (dag.constraints !== undefined) {
+        if (!Array.isArray(dag.constraints)) {
+            v.push({ code: "schema", message: "constraints must be an array" });
+        }
+        else {
+            if (dag.constraints.length > 40)
+                v.push({ code: "schema", message: "constraints maxItems 40" });
+            dag.constraints.forEach((c, i) => {
+                if (typeof c !== "string") {
+                    v.push({ code: "schema", message: `constraints[${i}] must be a string` });
+                }
+                else if (c.length < 10) {
+                    v.push({ code: "schema", message: `constraints[${i}] too short (minLength 10)` });
+                }
+            });
+        }
+    }
     const ids = new Set();
     for (const n of dag.nodes || []) {
+        if (n && typeof n === "object") {
+            const extraNode = unknownKeys(n, NODE_KEYS);
+            if (extraNode.length) {
+                v.push({ code: "schema", message: `unknown field(s) on ${n.id}: ${extraNode.join(", ")}`, nodes: [n.id] });
+            }
+            if (n.interfaces && typeof n.interfaces === "object") {
+                const extraIface = unknownKeys(n.interfaces, INTERFACE_KEYS);
+                if (extraIface.length) {
+                    v.push({
+                        code: "schema",
+                        message: `unknown field(s) in interfaces on ${n.id}: ${extraIface.join(", ")}`,
+                        nodes: [n.id],
+                    });
+                }
+            }
+        }
         if (!ID.test(n.id))
             v.push({ code: "schema", message: `bad id ${n.id}` });
         if (ids.has(n.id))
@@ -52,6 +122,16 @@ export function validate(dag) {
                 v.push({ code: "D3", message: `${n.id} owns ${g} — a lane that owns everything is not a lane`, nodes: [n.id] });
             }
         }
+        for (const c of n.interfaces?.consumes || []) {
+            if (typeof c !== "string" || c.length < 1 || c.length > 40) {
+                v.push({ code: "schema", message: `interfaces.consumes identifier invalid on ${n.id}: ${c}` });
+            }
+        }
+        for (const p of n.interfaces?.produces || []) {
+            if (typeof p !== "string" || p.length < 1 || p.length > 40) {
+                v.push({ code: "schema", message: `interfaces.produces identifier invalid on ${n.id}: ${p}` });
+            }
+        }
     }
     const idSet = new Set((dag.nodes || []).map((n) => n.id));
     for (const n of dag.nodes || []) {
@@ -63,13 +143,76 @@ export function validate(dag) {
     const cycle = findCycle(dag);
     if (cycle)
         v.push({ code: "D1", message: `cycle: ${cycle.join(" -> ")}`, nodes: cycle });
+    // Interface contracts: consumes/produces referential checks. Reuses the
+    // same depends_on adjacency findCycle walks, so an "order" violation means
+    // exactly what it says — the consuming node has no dependency path (direct
+    // or transitive) to a node that produces the identifier it needs.
+    //
+    // Matching is exact string equality — deliberately not case- or
+    // whitespace-normalized. `Auth.verifyToken`, `auth.verifyToken`, and
+    // `auth.verifyToken ` are three different identifiers as far as this is
+    // concerned: a mismatch is a real interface-unproduced rejection, never a
+    // silent match. This is the "reject" side of "either normalize or reject,
+    // explicitly" — chosen over normalizing because normalization would mean
+    // picking one of several plausible canonicalizations (case-fold? trim?
+    // both?) that nothing else in the dag.json format establishes, and
+    // guessing wrong there would silently paper over a genuine typo instead
+    // of surfacing it.
+    // Keyed by identifier -> the set of DISTINCT node ids that produce it. A
+    // node listing the same identifier twice in its own `produces` array (a
+    // data-entry duplicate, not an ownership conflict) must not inflate this
+    // to "produced by multiple nodes" — only genuinely different producer
+    // node ids make ownership ambiguous.
+    const producers = new Map();
+    for (const n of dag.nodes || []) {
+        for (const p of n.interfaces?.produces || []) {
+            if (typeof p !== "string" || !p.length)
+                continue;
+            if (!producers.has(p))
+                producers.set(p, new Set());
+            producers.get(p).add(n.id);
+        }
+    }
+    for (const [ident, producerIdSet] of producers) {
+        if (producerIdSet.size > 1) {
+            const producerIds = [...producerIdSet];
+            v.push({
+                code: "interface-duplicate",
+                message: `identifier ${ident} is produced by multiple nodes: ${producerIds.join(", ")} — ambiguous ownership`,
+                nodes: producerIds,
+            });
+        }
+    }
+    for (const n of dag.nodes || []) {
+        for (const c of n.interfaces?.consumes || []) {
+            if (typeof c !== "string" || !c.length)
+                continue;
+            const producerIds = [...(producers.get(c) || [])];
+            if (producerIds.length === 0) {
+                v.push({ code: "interface-unproduced", message: `${n.id} consumes ${c} but no node produces it`, nodes: [n.id] });
+                continue;
+            }
+            if (producerIds.includes(n.id)) {
+                v.push({ code: "interface-self", message: `${n.id} consumes ${c} which it also produces itself`, nodes: [n.id] });
+                continue;
+            }
+            const anc = transitiveDependencies(dag, n.id);
+            if (!producerIds.some((p) => anc.has(p))) {
+                v.push({
+                    code: "interface-order",
+                    message: `${n.id} consumes ${c} produced by ${producerIds.join(", ")} but does not (transitively) depend on ${producerIds.length > 1 ? "any of them" : producerIds[0]}`,
+                    nodes: [n.id, ...producerIds],
+                });
+            }
+        }
+    }
     const waves = plan(dag).waves;
     waves.forEach((wave, i) => {
         const high = wave.filter((id) => dag.nodes.find((n) => n.id === id)?.risk === "high");
         if (high.length > 2) {
             v.push({
                 code: "D7",
-                message: `wave ${i + 1} schedules ${high.length} high-risk nodes`,
+                message: `wave ${i} schedules ${high.length} high-risk nodes`,
                 nodes: high,
             });
         }
@@ -105,6 +248,26 @@ function findCycle(dag) {
     for (const id of nodes.keys())
         dfs(id);
     return found;
+}
+// Every node reachable from `id` by walking depends_on edges outward —
+// i.e. the set of nodes `id` transitively depends on (its ancestors in
+// build order). Used by the interface-order check: a node may only consume
+// an identifier produced by something in this set. Guards against cycles
+// with a `seen` set the same way findCycle does, so a malformed graph can't
+// spin this into an infinite loop.
+function transitiveDependencies(dag, id) {
+    const byId = new Map(dag.nodes.map((n) => [n.id, n]));
+    const seen = new Set();
+    const stack = [...(byId.get(id)?.depends_on || [])];
+    while (stack.length) {
+        const cur = stack.pop();
+        if (seen.has(cur))
+            continue;
+        seen.add(cur);
+        for (const d of byId.get(cur)?.depends_on || [])
+            stack.push(d);
+    }
+    return seen;
 }
 export function plan(dag) {
     const indeg = new Map();
@@ -407,7 +570,7 @@ export function laneIntersections(dag, wave) {
 }
 export function lanes(dag, waveIndex) {
     const { waves } = plan(dag);
-    const wave = waves[waveIndex - 1];
+    const wave = waveIndex >= 0 ? waves[waveIndex] : undefined;
     if (!wave)
         return [{ code: "wave", message: `no wave ${waveIndex}` }];
     return laneIntersections(dag, wave);

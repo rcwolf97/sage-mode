@@ -1,9 +1,22 @@
 #!/usr/bin/env sh
-# sage-solo — subagentStart. Deny-tier, failClosed. Reviewers cannot spawn children.
+# sage-solo — subagentStart (Cursor only). Deny-tier, failClosed. Reviewers
+# cannot spawn children.
+#
+# NO Claude Code equivalent: subagentStart's existence in Claude Code is
+# LOW confidence (unverified), so it is deliberately NOT registered in
+# hooks/hooks-claude.json — see that file's own comments. This script is
+# still made host-aware for defense in depth (uniform with every other
+# hook, and correct if it's ever manually wired under a Claude Code event
+# by someone who does confirm a matching event exists), but on Claude Code
+# today this guarantee — "a reviewer cannot spawn subagents" — is
+# UNENFORCED by any hook. It must be carried as an instruction on the
+# reviewer/red-team/design-critic agent cards instead.
 set -eu
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 . "$DIR/json-safe.sh"
+. "$DIR/host-detect.sh"
 json_read
+sage_detect_host
 
 # .sage/parent-role is stashed by sage-build immediately before dispatching a
 # subagent, naming the CURRENT parent's role. It must never outlive the
@@ -12,7 +25,7 @@ json_read
 # left over from (say) a reviewer dispatch keeps denying every unrelated
 # dispatch that comes after it, forever, until someone notices and deletes it
 # by hand.
-ROOT="${CURSOR_PROJECT_DIR:-.}"
+ROOT="$SAGE_PROJECT_DIR"
 MARKER="$ROOT/.sage/parent-role"
 PARENT=""
 if [ -f "$MARKER" ]; then
@@ -26,44 +39,57 @@ fi
 # "which interpreter is missing" message rather than a generic parse-failure
 # one that would be misleading (the payload may be perfectly valid JSON).
 if ! command -v python3 >/dev/null 2>&1 && ! command -v node >/dev/null 2>&1; then
-  printf '%s\n' '{"permission":"deny","agent_message":"[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."}'
-  exit 0
+  emit_deny "[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."
 fi
 
 if [ -z "${JSON_IN:-}" ] || ! json_valid; then
-  printf '%s\n' '{"permission":"deny","agent_message":"[solo] Could not parse payload. Blocked (fail closed)."}'
-  exit 0
+  emit_deny "[solo] Could not parse payload. Blocked (fail closed)."
 fi
 TYPE=$(json_get subagent_type)
 
+# As in sage-lane: the python/node block below reports its decision back to
+# the shell as an internal-protocol marker object rather than the final
+# host-shaped response — see json-safe.sh's emit_* block comment.
 if command -v python3 >/dev/null 2>&1; then
-python3 - "$TYPE" "$PARENT" <<'PY'
+SOLO_RESULT=$(python3 - "$TYPE" "$PARENT" <<'PY'
 import json, sys
 typ, parent = sys.argv[1], sys.argv[2]
 no_children = {"reviewer", "red-team", "design-critic"}
 if parent in no_children:
     typ = typ or "unknown"
     print(json.dumps({
-        "permission": "deny",
-        "agent_message": f"[solo] Review is terminal — role '{parent}' cannot spawn subagents (attempted: {typ})."
+        "sage_decision": "deny",
+        "sage_message": f"[solo] Review is terminal — role '{parent}' cannot spawn subagents (attempted: {typ})."
     }))
 else:
-    print("{}")
+    print(json.dumps({"sage_decision": "allow"}))
 PY
+)
 elif command -v node >/dev/null 2>&1; then
-node - "$TYPE" "$PARENT" <<'JS'
+SOLO_RESULT=$(node - "$TYPE" "$PARENT" <<'JS'
 const [typ, parent] = process.argv.slice(2);
 const noChildren = new Set(["reviewer", "red-team", "design-critic"]);
 if (noChildren.has(parent)) {
   const t = typ || "unknown";
   process.stdout.write(JSON.stringify({
-    permission: "deny",
-    agent_message: `[solo] Review is terminal — role '${parent}' cannot spawn subagents (attempted: ${t}).`
+    sage_decision: "deny",
+    sage_message: `[solo] Review is terminal — role '${parent}' cannot spawn subagents (attempted: ${t}).`
   }) + "\n");
 } else {
-  process.stdout.write("{}\n");
+  process.stdout.write(JSON.stringify({ sage_decision: "allow" }) + "\n");
 }
 JS
+)
 else
-  printf '%s\n' '{"permission":"deny","agent_message":"[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."}'
+  emit_deny "[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."
 fi
+
+# failClosed: an unrecognized/empty decision denies, same as an explicit
+# "deny" — never defaults to allow.
+SOLO_DECISION=$(json_get_from "${SOLO_RESULT:-}" sage_decision)
+SOLO_MESSAGE=$(json_get_from "${SOLO_RESULT:-}" sage_message)
+case "$SOLO_DECISION" in
+  deny) emit_deny "$SOLO_MESSAGE" ;;
+  allow) emit_allow ;;
+  *) emit_deny "[solo] Internal error evaluating the subagent-depth guard. Blocked (fail closed)." ;;
+esac

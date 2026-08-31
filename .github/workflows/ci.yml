@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run build
+      # npm test, not a hand-inlined subset — an earlier version of this
+      # workflow ran only `test/*.test.js`, silently excluding
+      # `lib/**/*.test.js` (which is where the lint-floor regression tests
+      # live). Keep this in sync with package.json's own "test" script
+      # rather than re-listing globs here.
+      - run: npm test
+      - run: node lib/cli.js lint
+      # Hook golden-payload suite — was never wired into CI at all. This is
+      # what would have caught the original dash-vs-bash breakage (every
+      # hook is `#!/usr/bin/env sh`, and dash — not bash — is `/bin/sh` on
+      # ubuntu-latest) before it shipped.
+      - run: bash hooks/tests/run.sh

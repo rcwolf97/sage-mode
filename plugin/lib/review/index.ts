@@ -1,4 +1,5 @@
-import { git } from "../util.js";
+import { join, relative, sep } from "node:path";
+import { git, gitRoot, projectDocsDir } from "../util.js";
 
 export interface Finding {
   severity: "CRITICAL" | "HIGH" | "MEDIUM" | "NITPICK";
@@ -12,6 +13,15 @@ export interface Finding {
   test_stub?: string;
   fingerprint?: string;
   specialist: string;
+  /** True when the reviewer could judge the requirement's *existence* (this
+   * finding names it) but not its correctness from the diff alone — the code
+   * that would prove or disprove it isn't part of what changed. A reviewer
+   * forced to pick pass/fail on such a requirement either invents a finding
+   * or waves it through; `cannot_verify` is the third option: say so,
+   * explicitly, instead. See gate()/dedup() for how this is kept from being
+   * gate-capped or lost, and classifyFinding() for how it's kept out of the
+   * normal confidence-band sections entirely. */
+  cannot_verify?: boolean;
 }
 
 export interface Scope {
@@ -42,15 +52,124 @@ export function fingerprint(f: Finding): string {
   return f.line ? `${f.path}:${f.line}:${f.category}` : `${f.path}:${f.category}`;
 }
 
-export function gate(findings: Finding[]): Finding[] {
-  return findings.map((f) => {
-    const copy = { ...f, fingerprint: fingerprint(f) };
-    if (!copy.evidence || !copy.evidence.trim()) {
+// ---------------------------------------------------------------------------
+// Finding row validation (schemas/finding.schema.json), enforced at gate()
+// ---------------------------------------------------------------------------
+//
+// architecture-v3 §8.3 claims the finding shape is enforced "at the tool
+// layer" via `--json-schema`. True for the Lane B path (`claude -p
+// --json-schema`) — FALSE for Lane C, where the reviewer runs as a Cursor/
+// Claude subagent: `output_schema` is not a documented subagent frontmatter
+// field on either host. So malformed JSONL from a Lane C specialist had
+// nothing between it and gate()/dedup() — a broken specialist that emits a
+// row missing `severity`, or a `confidence` of 47, would flow straight
+// through and *look like a clean bill of health*.
+//
+// Hand-rolled against schemas/finding.schema.json's actual constraints,
+// following lib/dag/index.ts's validate() style (explicit field checks, not
+// a generic JSON Schema interpreter) — this repo has zero runtime npm
+// dependencies and stays that way. A row failing any check is REJECTED with
+// a reason, never silently dropped (the reason travels with it — see
+// gate()) and never silently coerced (a non-integer or out-of-range
+// confidence is a rejection, not something rounded/clamped into range).
+const SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM", "NITPICK"]);
+const REQUIRED_NONEMPTY_STRING_FIELDS = ["path", "category", "summary", "specialist"] as const;
+const OPTIONAL_STRING_FIELDS = ["evidence", "fix", "test_stub", "fingerprint"] as const;
+
+export interface FindingValidation {
+  ok: boolean;
+  reason?: string;
+  finding?: Finding;
+}
+
+/** Validates one raw, untrusted JSON value against the finding schema's
+ * actual constraints (required fields; severity enum; integer confidence in
+ * 1-10; non-empty path/category/summary/specialist; integer line >= 1 when
+ * present; string-typed optional fields; boolean cannot_verify when
+ * present). additionalProperties stays true per the schema — unknown extra
+ * fields are not a rejection reason. */
+export function validateFindingRow(row: unknown): FindingValidation {
+  if (typeof row !== "object" || row === null || Array.isArray(row)) {
+    return { ok: false, reason: "row is not a JSON object" };
+  }
+  const r = row as Record<string, unknown>;
+
+  for (const field of ["severity", "confidence", "path", "category", "summary", "specialist"]) {
+    if (r[field] === undefined || r[field] === null) {
+      return { ok: false, reason: `missing required field "${field}"` };
+    }
+  }
+  if (typeof r.severity !== "string" || !SEVERITIES.has(r.severity)) {
+    return {
+      ok: false,
+      reason: `severity must be one of CRITICAL, HIGH, MEDIUM, NITPICK — got ${JSON.stringify(r.severity)}`,
+    };
+  }
+  if (typeof r.confidence !== "number" || !Number.isInteger(r.confidence) || r.confidence < 1 || r.confidence > 10) {
+    return { ok: false, reason: `confidence must be an integer 1-10 — got ${JSON.stringify(r.confidence)}` };
+  }
+  for (const field of REQUIRED_NONEMPTY_STRING_FIELDS) {
+    const v = r[field];
+    if (typeof v !== "string" || v.length < 1) {
+      return { ok: false, reason: `"${field}" must be a non-empty string — got ${JSON.stringify(v)}` };
+    }
+  }
+  if (r.line !== undefined) {
+    if (typeof r.line !== "number" || !Number.isInteger(r.line) || r.line < 1) {
+      return { ok: false, reason: `line must be an integer >= 1 when present — got ${JSON.stringify(r.line)}` };
+    }
+  }
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    if (r[field] !== undefined && typeof r[field] !== "string") {
+      return { ok: false, reason: `"${field}" must be a string when present — got ${JSON.stringify(r[field])}` };
+    }
+  }
+  if (r.cannot_verify !== undefined && typeof r.cannot_verify !== "boolean") {
+    return { ok: false, reason: `cannot_verify must be a boolean when present — got ${JSON.stringify(r.cannot_verify)}` };
+  }
+  return { ok: true, finding: row as Finding };
+}
+
+export interface RejectedFinding {
+  /** The raw row exactly as received, for the caller to log/surface. */
+  row: unknown;
+  /** Why validateFindingRow rejected it. */
+  reason: string;
+}
+
+/** gate()'s accepted findings, returned as a real Finding[] (so every
+ * existing caller — lib/cli.ts's `sage review gate`/`dedup`, toJsonl(),
+ * dedup() itself — keeps working against it exactly as before) with the
+ * rejects attached as a non-enumerable-by-JSON `.rejected` property: a
+ * caller that only wants the accepted findings (JSON.stringify, toJsonl,
+ * indexing) sees no difference; a caller that wires the new CLI surface for
+ * bug (4) reads `.rejected` explicitly to surface "N rows rejected: ..." to
+ * the human instead of a silent clean bill of health. */
+export type GatedFindings = Finding[] & { rejected: RejectedFinding[] };
+
+export function gate(findings: Finding[]): GatedFindings {
+  const accepted: Finding[] = [];
+  const rejected: RejectedFinding[] = [];
+  for (const row of findings) {
+    const v = validateFindingRow(row as unknown);
+    if (!v.ok) {
+      rejected.push({ row, reason: v.reason! });
+      continue;
+    }
+    const f = v.finding!;
+    const copy: Finding = { ...f, fingerprint: fingerprint(f) };
+    // Findings the reviewer flagged as `cannot_verify` are, by definition,
+    // ones the diff cannot supply evidence for — the whole point is that the
+    // evidence isn't in the diff. Capping their confidence for missing
+    // `evidence` would defeat that; every other finding keeps the existing
+    // low-evidence-caps-confidence rule.
+    if (!copy.cannot_verify && (!copy.evidence || !copy.evidence.trim())) {
       copy.confidence = Math.min(copy.confidence, 5);
     }
     copy.confidence = Math.max(1, Math.min(10, Math.round(copy.confidence)));
-    return copy;
-  });
+    accepted.push(copy);
+  }
+  return Object.assign(accepted, { rejected });
 }
 
 export function parseJsonl(text: string): Finding[] {
@@ -70,7 +189,7 @@ export function toJsonl(findings: Finding[]): string {
   return findings.map((f) => JSON.stringify(f)).join("\n") + (findings.length ? "\n" : "");
 }
 
-export function dedup(findings: Finding[]): Finding[] {
+export function dedup(findings: Finding[]): GatedFindings {
   const gated = gate(findings);
   const groups = new Map<string, Finding[]>();
   for (const f of gated) {
@@ -88,9 +207,21 @@ export function dedup(findings: Finding[]): Finding[] {
       keep.summary = `MULTI-SPECIALIST CONFIRMED (${specialists.join(" + ")}) ${keep.summary}`;
       keep.confidence = Math.min(10, keep.confidence + 1);
     }
+    // A cannot_verify finding must survive dedup as cannot_verify even when
+    // merged under a higher-confidence duplicate that didn't flag it that
+    // way — otherwise whichever specialist happened to score higher would
+    // silently erase the "check this by hand" signal the other one raised.
+    if (group.some((g) => g.cannot_verify)) keep.cannot_verify = true;
     out.push(keep);
   }
-  return out;
+  // dedup() calls gate() internally purely to key/merge only well-formed
+  // rows — but gate() already computed which rows were rejected, and that
+  // information must not evaporate here. Without this, a caller that goes
+  // through dedup() (rather than gate()) gets a silently-shorter output with
+  // no way to tell "nothing was wrong" apart from "N rows were malformed and
+  // got dropped" — precisely the clean-bill-of-health failure mode gate()'s
+  // `.rejected` exists to prevent (see the block comment above gate()).
+  return Object.assign(out, { rejected: gated.rejected });
 }
 
 export function classifyBand(confidence: number): "show" | "caveat" | "appendix" | "suppress" {
@@ -100,30 +231,97 @@ export function classifyBand(confidence: number): "show" | "caveat" | "appendix"
   return "suppress";
 }
 
+/** classifyBand's confidence-only bands, plus the first-class "cannot_verify"
+ * outcome: a finding for a requirement the diff doesn't touch, which no
+ * confidence score can honestly represent — it isn't "low confidence this is
+ * a bug," it's "unjudgeable from what changed." Routed to its own outcome
+ * unconditionally (checked before, and independent of, confidence) so a
+ * renderer can put these in their own section instead of folding them into
+ * a confidence band that implies a pass/fail judgment was actually made. */
+export function classifyFinding(f: Finding): "show" | "caveat" | "appendix" | "suppress" | "cannot_verify" {
+  if (f.cannot_verify) return "cannot_verify";
+  return classifyBand(f.confidence);
+}
+
+// ---------------------------------------------------------------------------
+// Sage's own scratch output is not review scope
+// ---------------------------------------------------------------------------
+//
+// Reproduced bug: `sage review scope` picked up .sage/sprints/NN/evidence.jsonl,
+// .sage/sprints/NN/logs/*, and .worktrees/<node>/ — sage-mode's own bookkeeping
+// and per-node worktree checkouts — as if they were reviewable source changes.
+// None of them matched any SCOPE_* category, so scope() set error:"unmatched"
+// and the CLI exits 2, which the skill escalates to the user as a classifier
+// bug. It isn't one: the tool's own scratch output manufactured the alarm.
+//
+// Fix is an unconditional exclusion, applied to the *union* of committed
+// diff + working-tree diff + untracked files before anything else runs —
+// classification, the unmatched check, and DIFF_LINES all see only the
+// filtered set. This is deliberately independent of whether .sage/ and
+// .worktrees/ are actually gitignored (see lib/evidence/index.ts's
+// checkSageIgnored for that separate, real concern): even a repo that force-
+// adds these paths, or one where evidence.jsonl was accidentally committed
+// once, must not have sage's own artifacts pollute review scope. The
+// deliberate union of committed + working-tree + untracked diffs itself is
+// unchanged and intentional — uncommitted WIP should still select reviewers.
+const SAGE_SCRATCH_PREFIXES = [".sage/", ".worktrees/"];
+
+function isSageScratchPath(path: string, notebookAssetsRelDir: string | null): boolean {
+  if (SAGE_SCRATCH_PREFIXES.some((p) => path === p.slice(0, -1) || path.startsWith(p))) return true;
+  if (notebookAssetsRelDir && (path === notebookAssetsRelDir || path.startsWith(notebookAssetsRelDir + "/"))) {
+    return true;
+  }
+  return false;
+}
+
+// Resolves to the project's notebook asset directory (default docs/assets,
+// or <config notebook.root>/assets — see lib/notebook/index.ts's copyAssets,
+// which is what actually writes there), relative to the repo root so it can
+// be compared against git's root-relative path output. Returns null when the
+// repo root can't be determined (e.g. cwd isn't inside a git repo at all) —
+// nothing to resolve against, and scope() already handles that case via the
+// no_base check on `opts.base`.
+function notebookAssetsRelDir(cwd: string): string | null {
+  const root = gitRoot(cwd);
+  if (!root) return null;
+  const assetsAbs = join(projectDocsDir(root), "assets");
+  const rel = relative(root, assetsAbs).split(sep).join("/");
+  return rel || null;
+}
+
 export function scope(opts: { base: string; cwd?: string }): Scope {
   const cwd = opts.cwd || process.cwd();
   const baseCheck = git(["rev-parse", "--verify", opts.base], cwd);
   if (baseCheck.status !== 0) {
     return emptyScope("no_base");
   }
-  const committed = git(["diff", "--name-only", opts.base], cwd)
-    .stdout.split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const wt = git(["diff", "--name-only"], cwd)
-    .stdout.split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const untracked = git(["ls-files", "--others", "--exclude-standard"], cwd)
-    .stdout.split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const assetsRel = notebookAssetsRelDir(cwd);
+  const excludeScratch = (rows: string[]) => rows.filter((f) => !isSageScratchPath(f, assetsRel));
+  const committed = excludeScratch(
+    git(["diff", "--name-only", opts.base], cwd)
+      .stdout.split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const wt = excludeScratch(
+    git(["diff", "--name-only"], cwd)
+      .stdout.split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const untracked = excludeScratch(
+    git(["ls-files", "--others", "--exclude-standard"], cwd)
+      .stdout.split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
   const files = [...new Set([...committed, ...wt, ...untracked])];
   const stat = git(["diff", "--numstat", opts.base], cwd).stdout;
   let lines = 0;
   for (const row of stat.split("\n")) {
-    const m = row.match(/^(\d+|-)\s+(\d+|-)/);
+    const m = row.match(/^(\d+|-)\s+(\d+|-)\s+(.*)$/);
     if (!m) continue;
+    if (isSageScratchPath(m[3]!.trim(), assetsRel)) continue;
     if (m[1] !== "-") lines += Number(m[1]);
     if (m[2] !== "-") lines += Number(m[2]);
   }
@@ -172,6 +370,24 @@ export interface SpecialistStats {
   [name: string]: { dispatches: number; findings: number };
 }
 
+// Single source of truth for the roster's 9 specialist names — select()'s
+// opts.all branch and the mechanical checklist-file test (test/review.test.ts)
+// both read from this instead of each keeping their own copy, which is what
+// let the two silently disagree before: a complex-workload review found
+// skills/sage-review/SKILL.md's "pass the checklist path" instruction had no
+// matching file for any of these names anywhere in the shipped plugin.
+export const SPECIALIST_ROSTER = [
+  "correctness",
+  "testing",
+  "maintainability",
+  "security",
+  "data-migration",
+  "api-contract",
+  "performance",
+  "design",
+  "prompt-eval",
+] as const;
+
 export function select(opts: {
   scope: Scope;
   stats?: SpecialistStats;
@@ -196,18 +412,7 @@ export function select(opts: {
   if (s.SCOPE_FRONTEND && opts.designRequired) add("design");
   if (s.SCOPE_AI) add("prompt-eval");
   if (opts.all) {
-    for (const n of [
-      "correctness",
-      "testing",
-      "maintainability",
-      "security",
-      "data-migration",
-      "api-contract",
-      "performance",
-      "design",
-      "prompt-eval",
-    ])
-      add(n);
+    for (const n of SPECIALIST_ROSTER) add(n);
   }
   for (const f of opts.force || []) add(f);
 
@@ -227,7 +432,88 @@ export function shouldRedTeam(scope: Scope, findings: Finding[]): boolean {
   return scope.DIFF_LINES > 200 || findings.some((f) => f.severity === "CRITICAL");
 }
 
+// --- Recommendation check -------------------------------------------------
+//
+// gstack's model: every review artifact ends with one canonical bottom-line
+// sentence — `Recommendation: <action> because <path:line — finding>` — so a
+// human skimming a long review can find "what do I do and why" without
+// reading every finding. This lives here (not lib/lint) because it is
+// review-domain logic, not plugin-structure linting: lib/lint walks
+// SKILL.md/agents/hooks/schemas for authoring hygiene, while this module
+// already owns the Finding schema, the fingerprint format, and the
+// gate/dedup pipeline the Recommendation line is supposed to be derived
+// from. Keeping the check next to gate()/dedup()/classifyBand() means the
+// whole pipeline — findings in, Recommendation out — stays in one file.
+//
+// The citation pattern intentionally mirrors fingerprint()'s
+// `{path}:{line}:{category}` shape (loosened to just `path:line`, since the
+// recommendation prose doesn't carry a machine-readable category suffix).
+const FILE_LINE_RE = /[\w./-]+:\d+/;
+
+// Mirrors lib/lint's CONDUCT_PHRASES: known-generic phrases that read as
+// boilerplate rather than a real, evidenced conclusion. A hedge alone fails
+// the check; a hedge that still names a concrete path:line does not, because
+// the specific citation is what actually carries the "why" — the wording
+// around it is not load-bearing once the citation is there.
+export const GENERIC_RECOMMENDATION_PHRASES = [
+  "proceed with caution",
+  "looks fine overall",
+  "no major issues",
+  "use your judgment",
+  "looks good overall",
+  "looks good to me",
+  "no significant issues found",
+];
+
+export interface RecommendationCheck {
+  ok: boolean;
+  issues: string[];
+}
+
+// Verifies a rendered review artifact (review.md contents) has a mandatory,
+// specific `## Recommendation` line. Checks, in order:
+//   1. the section exists at all
+//   2. it isn't empty
+//   3. it cites a specific file:line
+//   4. it isn't pure generic hedging with no citation to back it
+export function checkRecommendation(reviewMarkdown: string): RecommendationCheck {
+  const issues: string[] = [];
+  // Slice by heading boundary rather than a single lazy-match regex: a lazy
+  // `[\s\S]*?` bounded by a lookahead on multiline `$` is ambiguous the
+  // moment the body spans more than one line (multiline `$` matches before
+  // *every* newline, so the lookahead can succeed after just the first
+  // line). Finding the heading, then the next `## ` heading (or EOF), and
+  // slicing between is unambiguous regardless of how many lines the body
+  // spans.
+  const headingRe = /^## Recommendation[ \t]*$/m;
+  const headingMatch = headingRe.exec(reviewMarkdown);
+  if (!headingMatch) {
+    issues.push("missing ## Recommendation section");
+    return { ok: false, issues };
+  }
+  const rest = reviewMarkdown.slice(headingMatch.index + headingMatch[0].length);
+  const nextHeadingMatch = /^##\s/m.exec(rest);
+  const body = (nextHeadingMatch ? rest.slice(0, nextHeadingMatch.index) : rest).trim();
+  if (!body) {
+    issues.push("## Recommendation section is empty");
+    return { ok: false, issues };
+  }
+  const hasCitation = FILE_LINE_RE.test(body);
+  if (!hasCitation) {
+    issues.push("Recommendation does not cite a specific file:line");
+  }
+  const lower = body.toLowerCase();
+  const genericHit = GENERIC_RECOMMENDATION_PHRASES.find((p) => lower.includes(p));
+  if (genericHit && !hasCitation) {
+    issues.push(`Recommendation is a generic hedge ("${genericHit}") with no specific file:line citation`);
+  }
+  return { ok: issues.length === 0, issues };
+}
+
 export function classifyFix(f: Finding): "AUTO-FIX" | "ASK" {
+  // A cannot_verify finding has no diff evidence behind it by definition —
+  // there is nothing here an auto-fix could safely act on. Always ASK.
+  if (f.cannot_verify) return "ASK";
   if (f.test_stub) return "ASK";
   if (f.severity === "CRITICAL") return "ASK";
   const askCats = /security|auth|xss|injection|race|design/i;
