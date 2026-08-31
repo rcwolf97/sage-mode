@@ -14,6 +14,53 @@ function matchesAllowPath(path, entry) {
     const dir = (entry.endsWith("*") ? entry.slice(0, -1) : entry).replace(/\/$/, "");
     return path === dir || path.startsWith(dir + "/");
 }
+// ---------------------------------------------------------------------------
+// Self-invalidation guard: is .sage/ (and .worktrees/) actually gitignored?
+// ---------------------------------------------------------------------------
+//
+// run() writes its own log file under <root>/.sage/sprints/NN/logs/ (see
+// below) and appends to <root>/.sage/sprints/NN/evidence.jsonl. If .sage/ is
+// not gitignored, those writes are themselves untracked working-tree changes
+// that land between the pre-run and post-run wtree() snapshots — so the
+// TOCTOU guard (correctly) refuses to record a wtree, and check() then grades
+// every subsequent run STALE forever, with a reason string ("wtree missing or
+// not 40 hex characters") that points at nothing an operator can act on.
+// .worktrees/ has the same problem: node worktrees live inside the project
+// directory, and an untracked/dirty file under one is picked up by wtree()'s
+// `git add -A` against the temp index exactly like any other untracked file.
+//
+// git check-ignore -q is the authoritative check — it reasons from git's own
+// pattern-matching (global, per-repo, and nested .gitignore files alike)
+// rather than re-implementing ignore-file parsing here. It matches by path
+// pattern, not by file existence, so a synthetic probe path under a
+// not-yet-created directory (neither .sage/ nor .worktrees/ need exist yet
+// for this to give a real answer) is sufficient — nothing is created on disk.
+const IGNORE_PROBE_NAME = ".sage-ignore-probe";
+const SAGE_SCRATCH_DIRS = [".sage", ".worktrees"];
+function checkSageIgnored(root) {
+    const unignored = [];
+    for (const dir of SAGE_SCRATCH_DIRS) {
+        const probe = join(dir, IGNORE_PROBE_NAME);
+        const res = spawnSync("git", ["check-ignore", "-q", probe], { cwd: root });
+        // status 0 = ignored. status 1 = git's own, authoritative "not ignored".
+        // Anything else (128 = not a git repo, null = spawn failure, etc.) is
+        // "cannot tell" and is deliberately NOT treated as a violation — fail
+        // open on ambiguity, matching lib/board/index.ts's deriveWtfSignals
+        // posture toward repo state it can't confirm.
+        if (res.status === 1)
+            unignored.push(dir + "/");
+    }
+    if (!unignored.length)
+        return { ok: true, unignored: [] };
+    return {
+        ok: false,
+        unignored,
+        reason: `${unignored.join(" and ")} not gitignored — sage's own writes there ` +
+            `(evidence.jsonl, run logs, worktree checkouts) change the working-tree ` +
+            `fingerprint between the pre-run and post-run snapshot, so \`sage evidence check\` ` +
+            `can never grade FRESH. Fix: add\n  ${unignored.join("\n  ")}\nto .gitignore and commit it.`,
+    };
+}
 export function wtree(cwd) {
     const root = gitRoot(cwd);
     if (!root)
@@ -55,6 +102,44 @@ export function wtree(cwd) {
             /* ignore */
         }
     }
+}
+// A sharper TOCTOU guard than wtree() alone can provide. wtree() is
+// content-addressed by design (that's what makes it survive an identical
+// re-commit or a rebase) — but that same property makes it blind to a
+// mutate-then-revert-to-identical-content race: a test command that writes
+// different content to a tracked file mid-run and then writes the original
+// content back before exiting produces before === after on content alone,
+// even though whatever the test actually observed and asserted against
+// mid-run was the mutated version, not the tree state being certified.
+// mtime is not content-addressed — a real write syscall updates it even when
+// the final bytes match the original — so comparing a fingerprint of every
+// tracked file's mtime, in addition to the tree hash, catches exactly this
+// case. Deliberately conservative: this can flag a run STALE even when a
+// tracked file was touched and rewritten with genuinely identical content
+// for an unrelated, benign reason. That tradeoff is intentional and matches
+// this plugin's stated philosophy elsewhere (lib/dag's lane-overlap check:
+// "false positives are acceptable; false negatives are not") — an
+// occasional redundant re-run costs little; a false FRESH on evidence the
+// suite never actually ran against costs a lot.
+function trackedMtimeFingerprint(cwd) {
+    const root = gitRoot(cwd);
+    if (!root)
+        return null;
+    const ls = git(["ls-files"], root);
+    if (ls.status !== 0)
+        return null;
+    const files = (ls.stdout || "").split("\n").filter(Boolean);
+    const parts = [];
+    for (const f of files) {
+        try {
+            const st = statSync(join(root, f));
+            parts.push(`${f}:${st.mtimeMs}`);
+        }
+        catch {
+            parts.push(`${f}:missing`);
+        }
+    }
+    return sha256(parts.sort().join("\n"));
 }
 export function evidencePath(root, sprintId) {
     const sage = projectSageDir(root);
@@ -105,7 +190,29 @@ export function readEvidence(root, sprintId) {
 }
 export async function run(opts) {
     const cwd = opts.cwd || process.cwd();
+    // FAIL LOUD before doing any work: a run whose own bookkeeping writes can
+    // never let it grade FRESH is a run not worth starting, and silently
+    // starting it anyway is exactly the self-invalidation bug this guards
+    // against. Only enforced inside an actual git repo — gitRoot() returning
+    // null means wtree() will already fail closed for unrelated reasons, and
+    // there is nothing here to warn about.
+    const repoRoot = gitRoot(cwd);
+    if (repoRoot) {
+        const ignoreStatus = checkSageIgnored(repoRoot);
+        if (!ignoreStatus.ok) {
+            if (opts.allowUnignored) {
+                process.stderr.write(`sage evidence: warning: ${ignoreStatus.reason}\n` +
+                    `(continuing because --allow-unignored was passed; this run may never grade FRESH)\n`);
+            }
+            else {
+                process.stderr.write(`sage evidence: refusing to run — ${ignoreStatus.reason}\n` +
+                    `(pass --allow-unignored to downgrade this to a warning and proceed anyway)\n`);
+                return 1;
+            }
+        }
+    }
     const before = wtree(cwd);
+    const beforeMtime = trackedMtimeFingerprint(cwd);
     const started = Date.now();
     const cmdStr = opts.command.join(" ");
     const cmdHash = sha256(cmdStr);
@@ -158,6 +265,7 @@ export async function run(opts) {
     if (fd !== undefined)
         closeSync(fd);
     const after = wtree(cwd);
+    const afterMtime = trackedMtimeFingerprint(cwd);
     const commit = git(["rev-parse", "--short", "HEAD"], cwd).stdout.trim();
     const dirty = git(["status", "--porcelain"], cwd).stdout.trim().length > 0;
     const rec = {
@@ -172,8 +280,13 @@ export async function run(opts) {
         log_path: logPath,
         node: opts.node,
     };
-    if (before && after && before === after)
+    // Both fingerprints must agree the tree was untouched: content (wtree)
+    // AND mtime (trackedMtimeFingerprint, the TOCTOU-sharpening check above).
+    // A mutate-then-revert-to-identical-content race passes the content check
+    // but fails the mtime one, so it's still correctly refused here.
+    if (before && after && before === after && beforeMtime && afterMtime && beforeMtime === afterMtime) {
         rec.wtree = after;
+    }
     try {
         const ledger = join(sprint, "evidence.jsonl");
         mkdirSync(dirname(ledger), { recursive: true });
@@ -189,23 +302,33 @@ export function check(opts) {
     const recs = readEvidence(cwd, opts.sprintId).filter((r) => r.label === opts.label);
     const rec = recs.at(-1);
     if (!rec)
-        return { grade: "STALE", reason: "no record" };
+        return { grade: "STALE", reason: `no evidence record for label "${opts.label}" — run \`sage evidence run\` first` };
     if (rec.exit !== 0)
-        return { grade: "STALE", reason: "recorded run failed", record: rec };
+        return { grade: "STALE", reason: `recorded run exited ${rec.exit} (non-zero) — rerun and get a clean pass`, record: rec };
     if (opts.maxAgeHours != null) {
         const age = (Date.now() - Date.parse(rec.ts)) / 3600000;
-        if (age > opts.maxAgeHours)
-            return { grade: "STALE", reason: `older than ${opts.maxAgeHours}h`, record: rec };
+        if (age > opts.maxAgeHours) {
+            return { grade: "STALE", reason: `recorded run is ${age.toFixed(1)}h old, older than the ${opts.maxAgeHours}h max — rerun`, record: rec };
+        }
     }
     if (opts.expectCmd && sha256(opts.expectCmd) !== rec.cmd_sha256) {
-        return { grade: "STALE", reason: "command changed", record: rec };
+        return { grade: "STALE", reason: `recorded run used a different command than expected (cmd_sha256 mismatch) — rerun with the current command`, record: rec };
     }
-    if (!rec.wtree || !HEX40.test(rec.wtree)) {
-        return { grade: "STALE", reason: "wtree missing or not 40 hex characters", record: rec };
+    if (!rec.wtree) {
+        return {
+            grade: "STALE",
+            reason: "no wtree fingerprint was recorded for that run — the working tree changed between its start and its end " +
+                "(most commonly: .sage/ or .worktrees/ is not gitignored, so sage's own log/ledger write counted as a " +
+                "change; run `sage evidence run` again after fixing the cause, or once with --allow-unignored if that's expected)",
+            record: rec,
+        };
+    }
+    if (!HEX40.test(rec.wtree)) {
+        return { grade: "STALE", reason: `recorded wtree is malformed (not 40 hex characters): ${JSON.stringify(rec.wtree)}`, record: rec };
     }
     const now = wtree(cwd);
     if (!now)
-        return { grade: "STALE", reason: "cannot fingerprint working tree", record: rec };
+        return { grade: "STALE", reason: "cannot fingerprint the current working tree (not inside a git repo?)", record: rec };
     if (now !== rec.wtree) {
         const diff = git(["diff", "--name-only", rec.wtree, now], cwd).stdout.trim().split("\n").filter(Boolean);
         const allow = opts.allowPaths || [];

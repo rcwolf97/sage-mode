@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blind Comparative Review · sage-mode</title>
+<link rel="stylesheet" href="../assets/notebook.css">
+</head>
+<body>
+<div class="bar"><div class="bar-in">
+  <a class="brand" href="../index.html">sage<span>·</span>mode</a>
+  <nav><a href="../index.html">Home</a><a href="../design/tech-spec.html" class="on">Design</a><a href="../research/overview.html">Research</a></nav>
+</div></div>
+<div class="wrap">
+<main>
+  <div class="page-head">
+    <div class="eyebrow">Design</div>
+    <h1>Blind Comparative Review</h1>
+    <div class="sub">Plugin code only, no docs, judged against gstack and superpowers — gstack first, superpowers close second, sage-mode-plugin last on one damning finding</div>
+  </div>
+  <p>Reviewed 2026-08-24. Scope: exactly the three directories under <code>/root/blind-review/</code>, as shipped. No external docs, specs, or rubrics were consulted. One incidental note on contamination: <code>sage-mode-plugin/skills/design-critique/references/anti-slop-rubric.md</code> is a rubric, but it is the <em>product's own</em> UI-design-quality rubric (used by its <code>design-critique</code> skill), not an external grading document — it is in-scope product content, not contamination. Nothing else resembling an external "tech spec" or "build review" was encountered. Two hook comments inside sage-mode-plugin (<code>sage-lane</code>, <code>hooks/tests/run.sh</code>) reference "tech-spec.md §4.1" — this is the <em>product's own</em> internal design doc, not shipped in this tree; it is cited the way code cites an ADR, not read by me, and is noted only for completeness.</p>
+<p>All three repos were extracted without their <code>.git</code> history. Where that mattered for testing (both gstack and superpowers ship tooling that shells out to <code>git</code>), I ran <code>git init &amp;&amp; git add -A &amp;&amp; git commit</code> inside a scratch copy to unblock test suites, and treated any resulting behavior change as an environment artifact, not a product bug — flagged explicitly below wherever it came up.</p>
+<hr />
+<h2 id="verdict">Verdict</h2>
+<p><strong>Of the three, I would trust <code>gstack</code> the most for a real, immediate project, with <code>superpowers</code> a very close second for a team that wants something smaller and more auditable, and <code>sage-mode-plugin</code> last — not because its ideas are bad, but because roughly half of its shipped "skill catalog" is templated filler wearing the shape of finished content, which is exactly the failure mode this review was asked to hunt for.</strong></p>
+<p>Reasoning, briefly:</p>
+<ul>
+<li><strong>gstack</strong> is the largest, most operationally mature of the three. Its test suite is real (6,500+ tests), its safety hooks are the most carefully engineered of the three (anchored HIGH-tier matching avoids a false-positive class that sage-mode's equivalent hook actually has), and its more exotic claims — a hash-chained, tamper-evident egress ledger — held up under direct adversarial testing, including its own stated <em>limits</em> (it does not claim to catch truncation, and indeed does not). It is also the most bloated, the most self-promotional (the README is as much a personal productivity press release as a product doc), and the hardest to fully audit in one sitting because of its sheer size — but "hard to audit because there's a lot of real content" is a much better problem to have than "easy to audit because most of it is a stub."</li>
+<li><strong>superpowers</strong> is the smallest and the most intellectually coherent of the three. Every skill I sampled was genuinely authored, its release notes show 1,400 lines of real, dated, issue-numbered iteration, and it is honest about being a <em>methodology</em> plugin: it ships exactly one hook (SessionStart, for context injection) and has <strong>no mechanical enforcement of anything</strong> — no PreToolUse deny/ask hook exists anywhere in the tree. Its safety story is 100% "the model reads the skill and complies," which is a legitimate design bet but a categorically weaker guarantee than the other two, and the README's "mandatory workflows, not suggestions" framing slightly overstates what a plugin with zero enforcement hooks can actually guarantee.</li>
+<li><strong>sage-mode-plugin</strong> has the best-engineered <em>hooks</em> of the three (all pass a real 80-case dash-forced test matrix, and its symlink-escape and lane-boundary defenses held up under my own adversarial probing), a genuinely excellent handful of core skills (<code>sage-shape</code> in particular is 400+ lines of specific, non-generic, worked-example-driven procedure), and a self-aware lint tool that tracks a real engineering problem ("looks scaffolded but never actually written"). But that lint tool then <strong>exempts</strong> the one directory that most needs the check: all 25 files in <code>skills/catalog/</code> are the same 34-line template with five words swapped, and the lint tool's own comment claims they're "reviewed and confirmed present/correct" — a claim my diff of the files directly contradicts. A repo whose own scaffolding-detector is disabled on the exact content that is scaffolding is a repo I'd need to personally re-audit before trusting anything else in it labeled "done."</li>
+</ul>
+<p>None of the three is disqualifying on its own terms. This verdict is about which one I'd hand to a team today with the least "come back and fix what turned out to be a facade" risk.</p>
+<hr />
+<h2 id="sage-mode-plugin">sage-mode-plugin</h2>
+<h3 id="in-theory">In theory</h3>
+<p>The core idea is a sprint-shaped delivery pipeline (<code>sage-shape</code> → <code>sage-plan</code> → <code>sage-dag</code> → <code>sage-build</code> → <code>sage-review</code> → <code>sage-ship</code> → <code>sage-retro</code>) run by specialist subagents on a DAG, with file-level "lanes" (glob-based <code>owns</code> boundaries) enforced by a hook so parallel implementers can't collide. Review is adversarial by construction: the <code>reviewer</code> agent runs on a <strong>different model family</strong> (<code>gemini-3.7-flash</code>) from the implementers (<code>grok-4.5</code>/<code>grok-4.6</code>), is <code>readonly</code>, may not spawn children, and is explicitly told never to trust the implementer's own claim of "done" — it re-derives the diff from git itself. That's a coherent, well-thought-out anti-collusion design, not just a vocabulary choice.</p>
+<p>Cost/model awareness is real and more specific than a generic "cheap vs. expensive model" toggle: <code>lib/consult</code> implements a two-lane architecture — "Lane B" is <code>claude -p</code> under flat-rate subscription billing, "Lane A" is a fallback in-thread model. The code explicitly warns (loudly, once per call) if <code>ANTHROPIC_API_KEY</code> is inherited from the environment, because that would silently reroute a Lane B call through metered billing and defeat the entire cost architecture — a subtle, correctly-identified footgun that most plugins wouldn't think to guard against.</p>
+<h3 id="in-practice">In practice</h3>
+<pre><code>$ npx tsc -p tsconfig.json          → clean, no errors
+$ node --test test/*.test.js lib/**/*.test.js
+ℹ tests 46 / pass 46 / fail 0        (8.4s)
+$ node lib/cli.js lint
+ok
+</code></pre>
+<p>Hook test matrix (<code>hooks/tests/run.sh</code>, forces every hook under both its own <code>#!/usr/bin/env sh</code> shebang <em>and</em> explicitly under <code>/usr/bin/dash</code>):</p>
+<pre><code>80/80 &quot;ok&quot; — 0 failures, run twice (default-shebang pass + forced-dash pass)
+</code></pre>
+<p>I then adversarially tested the two deny-tier hooks myself, beyond the shipped fixtures:</p>
+<ul>
+<li><strong><code>sage-careful</code></strong> (ask-tier, "HIGH deny only for simple recursive delete of / ~ $HOME /<em>"): correctly denies <code>rm -rf /</code>, <code>sudo rm -rf /</code>, <code>rm -fr /</code>, <code>rm -r -f /</code>, <code>rm -rf --no-preserve-root /</code>, <code>rm -rf $HOME</code>; correctly </em>allows<em> <code>rm -rf /home/user/myproject</code>; correctly falls back to ask-tier (not deny) on the compound <code>true; rm -rf /</code>, matching its own documented "simple commands only" scope. </em><em>But</em>* it hard-denies <code>echo rm -rf /</code> — a completely harmless command — because its token scan checks whether <code>rm</code> appears anywhere among the whitespace-split tokens, not whether it's the command actually being executed. That is a real false-positive bug in the "HIGH deny" tier of a hook whose entire selling point is precision string/token matching to avoid exactly this class of mistake.</li>
+<li><strong><code>sage-lane</code></strong> (deny-tier, fail-closed file-lane enforcement): I built a real symlink (<code>src/escape → /tmp/lanetest/outside</code>) inside an owned lane and confirmed the hook resolves it with <code>realpath</code>/<code>os.path.realpath</code> and correctly denies the write as "outside owns" — the symlink-escape defense the code's own tests claim is real, is real. Absolute-path escapes (<code>/etc/passwd</code>) and relative escapes (<code>../outside/evil.txt</code>) are also correctly denied.</li>
+</ul>
+<p>Skill-content authenticity is genuinely bimodal:</p>
+<ul>
+<li><strong><code>sage-shape</code></strong> (409 lines) is excellent — a fully worked, specific interrogation procedure with a demand-test evidence table (waitlist signups vs. paid-deal-blocked, with reasoning for each row), anti-pattern examples, and an explicit self-check before writing anything. This is what "a real procedure" looks like.</li>
+<li><strong><code>skills/catalog/</code></strong> (25 files, all <code>disable-model-invocation: true</code>, retrieved by <code>sage-recall</code>) is the opposite. Every one of the 25 is 34 lines and, once you strip the frontmatter's <code>name</code>/<code>description</code>/<code>applies_when</code>, is <strong>byte-identical</strong> to every other one:</li>
+</ul>
+<pre><code class="language-diff">&lt; name: adr
+&lt; description: Catalog skill — architecture decision records, options, consequences...
+&lt; applies_when: &quot;recording a durable technical decision&quot;
+---
+&gt; name: skill-authoring
+&gt; description: Catalog skill — frontmatter, caps, rationalization tables, evals...
+&gt; applies_when: &quot;writing or revising a sage-mode skill&quot;
+</code></pre>
+<p>Everything else — the four-step "Procedure," the two-row "Common Rationalizations" table, the three "Red Flags," the "Done when" line — is the literal same text, mad-libbed with the topic name substituted into one sentence. <code>security-audit</code>, <code>dead-code</code>, <code>load-test</code>, <code>secrets-scan</code>, <code>threat-model</code> — 25 supposedly distinct domain-specific procedures that are the same generic three-paragraph outline wearing different labels. This is exactly the "whole category scaffolded but never actually written" pattern the review brief asked me to look for, and it is unambiguous — I diffed multiple pairs, not just two, to rule out a cherry-picked example.</p>
+<p>The project's own <code>lib/lint</code> tool has a rule for precisely this ("looks scaffolded but never actually written," triggered when a file falls under 25% of its line cap) — and explicitly <strong>exempts</strong> <code>skills/catalog/*</code> from it, with a code comment claiming these are "a deliberately different genre... reviewed and confirmed present/correct." My own diff of the files directly contradicts "reviewed and confirmed present/correct": they are not differentiated content, they are one template.</p>
+<p>Other data points: <code>agents/*.md</code> (18 files, 19–29 lines each) are short but genuinely differentiated — each has a distinct model assignment, a role-specific checklist (e.g. <code>implementer-data.md</code>'s migration-safety checklist: reversibility, no unbounded backfill, lock-duration checks against table size), and distinct output contracts. These are not templated. <code>evals/comparison.md</code> is an honest, unfilled-in template ("If sage-mode is not better on defects-escaped, the process is ceremony. Publish the result whichever way it goes.") — good intent, but as shipped there's no evidence it has ever actually been run.</p>
+<h3 id="notable">Notable</h3>
+<ul>
+<li>Zero runtime npm dependencies (marked/mermaid vendored); TypeScript strict mode, clean compile.</li>
+<li>The <code>.cursor-plugin/marketplace.json</code> vs. plugin-root distinction in the README is unusually careful about a real installation footgun most plugin READMEs don't bother explaining.</li>
+</ul>
+<hr />
+<h2 id="gstack">gstack</h2>
+<h3 id="in-theory_1">In theory</h3>
+<p>gstack is less a single coherent methodology than a very large personal engineering-automation platform (30+ slash-command skills, standalone CLIs, a browser-automation daemon, egress auditing, iOS QA over USB, gbrain memory integration) shipped as one plugin. The README's framing — an ex-Palantir/YC-president "software factory," with productivity multiplier claims (~810× a 2013 baseline) — is marketing copy I did not and could not verify, and it sets a self-promotional tone that's worth naming plainly as a taste/trust signal independent of the code quality underneath it.</p>
+<p>The engineering philosophy that <em>is</em> verifiable from the code: defense in depth, honest about its own limits, with an unusual amount of "why" commentary embedded directly in the scripts (bug numbers, dated fixes, explicit false-positive-avoidance reasoning). The security tooling in particular (<code>/cso</code>) is a two-tier confidence-gated system (8/10 daily, 2/10 comprehensive) with 22 named hard-exclusions and named <em>exceptions to</em> those exclusions (e.g., LLM cost-amplification findings are explicitly carved out of the DoS exclusion) — this reads like a tool that has actually been run against real code and had its false-positive list built empirically, not written speculatively.</p>
+<p>Multi-agent coordination happens at two different granularities: within a session, <code>/review</code> and <code>/cso</code> dispatch specialist reviewers in parallel via the Agent tool ("Launch ALL selected specialists in a single message... Each subagent has fresh context — no prior review bias"); across sessions, the model is running many full Claude Code sessions in parallel via a third-party tool (Conductor), each in its own git worktree — a coarser, process-level isolation rather than an in-session DAG like sage-mode's.</p>
+<p>Cost/model differentiation is real: <code>/open-gstack-browser</code>'s sidebar explicitly routes Sonnet for fast actions vs. Opus for analysis, <code>gstack-model-benchmark</code> cross-tests Claude/GPT/Gemini, and Codex integration auto-generates a bounded-scope behavioral profile keyed to a specific model ID (<code>gpt-5.6-sol</code>) with an explicit warning on near-miss version strings.</p>
+<h3 id="in-practice_1">In practice</h3>
+<pre><code>$ bun install                         → 229 packages, clean
+$ bun run test:free                   → 6,537 + 879 tests across 469 files
+                                         69 + 1 failing (~1% failure rate)
+</code></pre>
+<p>I traced the failures rather than taking the raw count at face value:</p>
+<ul>
+<li>A large fraction are <code>error: launch: Executable doesn't exist at .../chrome-headless-shell</code> — this sandbox has no Playwright browser binaries installed; genuinely untestable here, not a code defect.</li>
+<li>A second large fraction are <code>git ls-files</code>/<code>git rev-parse</code> failures because the extracted tree ships without <code>.git</code>. After I <code>git init</code>'d a scratch copy, the git-dependent suites I re-ran (<code>gstack-slug-cwd-walk-up</code>, <code>gstack-repo-mode</code>, <code>mktemp-portability</code>, <code>tracker-guard-wiring</code>, <code>resolvers-gbrain-put-rewrite</code>, <code>skill-size-budget</code>) passed. Not a product bug.</li>
+<li><code>fs-atomic.test.ts</code>'s one failure ("expected atomicWriteSync to throw in read-only dir") is because these tests ran as root, which bypasses the POSIX permission check the test relies on — a sandbox artifact, not a bug (though also not something the test suite guards against, which is a minor robustness gap worth a one-line skip-if-root guard).</li>
+<li><code>distill-apply.test.ts</code>'s ten failures looked like real product bugs at first (<code>NO_PROPOSALS: .../projects/tmp/... missing</code>) — I traced this to root cause: gstack's own <code>gstack-slug</code> walks <em>up</em> from cwd looking for the outermost project-identity marker (<code>.git</code>, <code>package.json</code>, <code>README.md</code>, etc.), and this sandbox's <code>/tmp</code> happened to contain a stray <code>package.json</code> left by an unrelated prior process, which the walk-up correctly treated as a "strong marker," collapsing the test's synthetic project directory into a slug of <code>tmp</code>. This is sandbox contamination outside gstack's control, and when I read the mechanism it's actually working exactly as its own extensive design comments describe (including a documented fix history for the exact "phantom slug from a deploy artifact" failure mode this class of bug would represent). I'm reporting this as <strong>verified-correct-under-adversarial-conditions</strong>, not as a failure, once the true cause was isolated.</li>
+</ul>
+<p>Net: after accounting for environment artifacts, I found no failing test in this suite that traces to an actual gstack defect.</p>
+<p>I then adversarially tested the shipped <code>/careful</code> hook (<code>careful/bin/check-careful.sh</code>, <code>#!/usr/bin/env bash</code> — correctly declared and used as bash throughout, no <code>sh</code>-portability risk in this repo's hooks):</p>
+<pre><code>rm -rf /                          → HIGH deny  (correct)
+echo rm -rf /                     → MEDIUM ask, NOT hard-deny (correct — anchored `^rm` check)
+rm -rf /home/user/proj            → MEDIUM ask (correct, not a HIGH target)
+git commit -m &quot;wip&quot; &amp;&amp; rm -rf /   → MEDIUM ask (compound falls through, as documented)
+rm${IFS}-rf${IFS}/                → ask, &quot;Shell obfuscation detected&quot; (correct)
+</code></pre>
+<p>This is the same class of check as sage-mode's <code>sage-careful</code>, but gstack's HIGH-tier regex is anchored to the start of the command (<code>^[[:space:]]*(sudo[[:space:]]+)?rm[[:space:]]</code>), which is why <code>echo rm -rf /</code> does <strong>not</strong> get hard-denied here the way it incorrectly does under sage-mode's unanchored token scan. This is a concrete, adversarially-confirmed quality difference between the two projects' nominally-equivalent safety hooks, in gstack's favor. (gstack's MEDIUM tier does still fire an <code>ask</code> on the harmless <code>echo</code> command — a much lower-cost false positive than a hard deny, and one the script's own comments concede is intentionally conservative.)</p>
+<p>I also directly tested the specific, falsifiable claim in the README about <code>gstack-egress</code>: "hash-chained, tamper-evident receipt... <code>verify</code> recomputes the hash chain and exits 3 on tamper... truncating or deleting the ledger itself is out of scope."</p>
+<pre><code>$ bun bin/gstack-egress-receipt write --sink test --host example.com ...   (x2, chained via prev-hash)
+$ bun bin/gstack-egress verify
+chain intact: 2 line(s) verified   [exit 0]
+
+# tamper: rewrite &quot;host&quot; field in line 1 via python json edit
+$ bun bin/gstack-egress verify
+TAMPER: chain broken at line 2 (prev hash does not match previous line)   [exit 3]
+
+# separately: truncate (delete) the last line of a 3-entry ledger
+$ bun bin/gstack-egress verify
+chain intact: 2 line(s) verified   [exit 0]   ← truncation NOT detected, exactly as documented
+</code></pre>
+<p>Both halves of the claim verified: it does detect tampering (mid-chain edits) and it does <em>not</em> detect truncation — and the README says exactly that, rather than over-claiming. This is a genuine positive: a security-adjacent feature whose documentation matches its actual, tested behavior on both the "works" and "doesn't work" sides.</p>
+<h3 id="weaknesses">Weaknesses</h3>
+<ul>
+<li>Scale makes full audit impractical in one sitting; I sampled deeply (careful hook, egress ledger, slug resolution, <code>/cso</code>'s exclusion list, <code>/review</code>'s specialist dispatch, one full <code>review/specialists/*.md</code> file) rather than exhaustively, and found the sampled content to be genuinely authored, not templated — but I cannot make a total-coverage claim the way I can for sage-mode's smaller catalog.</li>
+<li>Each SKILL.md carries ~800 lines of shared, auto-generated boilerplate (session bootstrap, telemetry, plan-mode handling, AskUserQuestion formatting, checkpoint mode, etc.) ahead of the skill-specific content. This is legitimate infrastructure, but it means the file-length numbers in the README's skill table are not a good proxy for "how much was actually authored per skill" — <code>/cso</code> at 1,303 lines is really ~840 lines of shared framework plus ~460 lines of CSO-specific procedure.</li>
+<li><code>/cso</code>'s hard-exclusion list item 22 ("Skill files that are part of gstack itself (trusted source)") is a self-exemption in a tool whose other 21 rules are about <em>not</em> trusting things by default — a real, if minor, blind spot for a security auditor to carve its own vendor's code out of scrutiny.</li>
+<li>The README's productivity-multiplier framing (810×, 240× a prior year) is unfalsifiable from a static repo and reads as marketing rather than engineering documentation; it doesn't affect the code quality but it is a legitimate trust signal in the other direction from the verified mechanisms above.</li>
+</ul>
+<hr />
+<h2 id="superpowers">superpowers</h2>
+<h3 id="in-theory_2">In theory</h3>
+<p>The smallest and most focused of the three: 14 skills, one philosophy (TDD applied recursively — to code, and to the skills themselves), and an unusually disciplined contribution process. <code>CLAUDE.md</code> opens with "This repo has a 94% PR rejection rate" and a direct instruction to AI agents about to open a PR to verify the problem is real, search for duplicates, and disclose their own model/harness — a level of self-aware anti-slop process I did not see matched in the other two repos' own contribution stories (neither ships a comparable AI-contributor gate).</p>
+<p>The core workflow (brainstorming → worktree → plan → subagent-driven execution with two-stage review → TDD → code review → finish) is coherent and the "mandatory, not suggestions" framing is explicit. Multi-agent coordination is handled at the <em>convention</em> level: <code>dispatching-parallel-agents</code> and <code>subagent-driven-development</code> both instruct fresh, isolated subagents per task, dispatched together in one message for true parallelism, with explicit review-for-conflicts afterward — a clear, well-illustrated pattern (real "6 failures across 3 files" worked example), but enforced entirely by the model choosing to follow the skill text, not by any hook.</p>
+<p>Model/cost-tier awareness is essentially absent as a first-class concept — I found no equivalent of sage-mode's Lane A/B billing-aware routing or gstack's Sonnet/Opus task-based routing. This is consistent with superpowers' scope (a skills methodology, not an execution platform) but is a real, verifiable gap relative to the other two on this specific dimension.</p>
+<h3 id="in-practice_2">In practice</h3>
+<pre><code>$ bash scripts/lint-shell.sh --all      (after apt-installing shellcheck; repo doesn't vendor it)
+Linting 45 shell files
+14 SC-level warnings, all SC2155/SC2064/SC2088 style nits in *test* scripts
+(no findings in production hooks/scripts)
+exit=1  (shellcheck's own warning-severity gate, not a crash)
+</code></pre>
+<p>The whole repo ships <strong>zero</strong> production <code>#!/usr/bin/env sh</code> scripts — the two matches I found for <code>sh</code> shebangs are inside a test file's heredoc fixture content used to test the lint tool's own detection logic, not real scripts. Every real script (<code>hooks/session-start</code>, all of <code>scripts/*.sh</code>) declares and is written as <code>#!/usr/bin/env bash</code>. This sidesteps the entire "declares sh, breaks under dash" bug class this review was asked to specifically hunt for — not because superpowers solved the portability problem, but because it opted out of the risk category entirely by requiring bash unconditionally. That's a legitimate, different bet from the other two (both of which <em>do</em> target POSIX <code>sh</code> for their hooks and back the choice with dash-forced test runs), worth naming as a real design-philosophy difference rather than a defect either way.</p>
+<p>I ran the fast, non-agentic test scripts directly:</p>
+<pre><code>tests/shell-lint/test-lint-shell.sh          → 18/18 PASS
+tests/hooks/test-session-start.sh            → 6/6 PASS
+tests/systematic-debugging/test-find-polluter.sh → 5/5 PASS
+tests/writing-skills/test-render-graphs.sh   → 3/8 PASS until I `apt install graphviz`
+                                                → 8/8 PASS once the real dependency existed
+tests/version-bump/test-bump-version.sh      → inconclusive: this sandbox's `yq` binary
+                                                resolves to the Python/jq-wrapper `yq`
+                                                (version string &quot;0.0.0&quot;), not the Go
+                                                mikefarah/yq the script's `strenv()` syntax
+                                                requires — a real ambiguity in the `yq`
+                                                name across ecosystems, not a superpowers bug,
+                                                but the script has no version/flavor guard
+                                                against installing the wrong one, which is a
+                                                minor real robustness gap.
+</code></pre>
+<p>I also directly ran the SessionStart hook (the only hook this plugin ships) end-to-end:</p>
+<pre><code>$ CLAUDE_PLUGIN_ROOT=... bash hooks/session-start
+→ valid JSON, hookSpecificOutput.additionalContext populated with the full
+  using-superpowers SKILL.md content, correctly branching format by
+  CURSOR_PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT / Copilot-CLI env detection
+</code></pre>
+<p>Works exactly as documented, and the code comments show it has a real bug-fix history against a specific upstream issue (bash 5.3+ heredoc hang, github issue #571) rather than being untested.</p>
+<p>The larger, genuinely agentic test suites (<code>tests/claude-code/run-skill-tests.sh</code>, the entire <code>tests/explicit-skill-requests/</code> directory) invoke a live <code>claude</code> CLI against real prompts to verify the model actually invokes the right skill — this is exactly the kind of behavior test the review brief anticipated being untestable from a static repo, and it is: I could not run it here (no live agentic session available), and I'm reporting that plainly rather than guessing at pass/fail. The README's own claim that "skill-behavior tests use the drill eval harness from superpowers-evals, cloned into evals/" is honestly scoped — that harness is explicitly an external clone-in step, and this shipped tree genuinely has no <code>evals/</code> directory, consistent with the README's own description rather than a discrepancy.</p>
+<p>Skill-content sampling (<code>systematic-debugging</code>, <code>dispatching-parallel-agents</code>, <code>writing-skills</code>, both read closely) found consistently real, non-templated, specifically-authored procedures — phase-by-phase debugging discipline with a concrete multi-layer diagnostic-instrumentation example, a real "6 test failures across 3 files" worked parallel-dispatch example, and a self-referential TDD-for-skills methodology (a skill about writing skills that itself follows red/green/refactor against subagent pressure-tests). <code>RELEASE-NOTES.md</code> (1,400 lines) shows genuine, dated, issue-numbered iteration ("One donated session had sat blocked for almost nine hours on a question the controller could have decided" — the kind of detail that reads as a real incident, not invented copy).</p>
+<h3 id="weaknesses_1">Weaknesses</h3>
+<ul>
+<li><strong>No mechanical safety enforcement anywhere.</strong> One hook exists (<code>SessionStart</code>), and it only injects context. There is no PreToolUse/Stop hook comparable to sage-mode's <code>sage-lane</code>/<code>sage-careful</code> or gstack's <code>/careful</code>/<code>/freeze</code>. The "mandatory, not suggestions" language in the README is therefore a claim about prompt-level discipline, not an enforced guarantee — a materially different (and weaker) safety posture than the other two, worth being explicit about since the README doesn't emphasize this gap itself.</li>
+<li>No cost/model-tiering concept at all — a real, if scope-consistent, absence relative to the other two.</li>
+<li>Multi-agent coordination is convention-only (no lane/glob enforcement), so a "spec compliance, then code quality" two-stage review is only as good as the reviewing subagent's fidelity to the instructions it was given, with no hook backstop if it drifts.</li>
+</ul>
+<hr />
+<h2 id="head-to-head-by-dimension">Head-to-head, by dimension</h2>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>sage-mode-plugin</th>
+<th>gstack</th>
+<th>superpowers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Mechanical safety enforcement</strong></td>
+<td>Real, hook-based, fail-closed lane/symlink defense verified by adversarial testing; but its HIGH-deny command matcher has a real false-positive bug (<code>echo rm -rf /</code> → hard deny)</td>
+<td>Real, hook-based; more precisely anchored than sage-mode's equivalent check (same adversarial probe did <strong>not</strong> false-positive); tamper-evident egress ledger verified to behave exactly as documented on both the "catches this" and "doesn't catch that" sides</td>
+<td><strong>None.</strong> One SessionStart hook, no PreToolUse/Stop enforcement anywhere; safety is 100% prompt discipline</td>
+</tr>
+<tr>
+<td><strong>Shell portability (the <code>env sh</code> under dash question)</strong></td>
+<td>Ships real <code>sh</code> hooks; all pass a dedicated 80-case matrix forced under <code>/usr/bin/dash</code>, and I independently reran that matrix successfully</td>
+<td>Ships zero <code>sh</code> hooks — everything is explicitly <code>bash</code>, so the dash-portability risk class doesn't apply to its hooks</td>
+<td>Ships zero production <code>sh</code> scripts at all — the risk class is opted out of entirely (different bet, not a fix)</td>
+</tr>
+<tr>
+<td><strong>Cost/model-selection awareness</strong></td>
+<td>Real and specific: Lane A/B billing-aware routing, explicit metered-billing footgun warning, per-role model assignment on every agent file</td>
+<td>Real: task-based Sonnet/Opus routing in the browser sidebar, cross-model benchmarking CLI, model-specific behavioral profiles (down to exact version-string matching)</td>
+<td>Effectively absent — not a design goal of this plugin</td>
+</tr>
+<tr>
+<td><strong>Multi-agent / parallel work</strong></td>
+<td>DAG-planned sprints with hook-enforced file-ownership lanes ("owns" globs) — the only one of the three with an <em>enforced</em>, not just conventional, conflict-avoidance mechanism</td>
+<td>Parallel specialist dispatch within a session (Agent tool, fresh context) plus coarser process-level parallelism across sessions via a third-party tool (Conductor)</td>
+<td>Parallel subagent dispatch by convention, well-illustrated with a real worked example, no enforcement backstop</td>
+</tr>
+<tr>
+<td><strong>Shipped-content completeness vs. apparent structure</strong></td>
+<td><strong>Worst on this axis.</strong> <code>skills/catalog/</code> (25 files, elaborate-looking directory structure) is one 34-line template with the topic name swapped in, verbatim across every file — confirmed by direct diff, not sampling error. Core <code>sage-*</code> skills are excellent and not templated.</td>
+<td>Best-sampled depth: everything I read (careful hook, egress ledger, <code>/cso</code>'s exclusion list, a <code>review/specialists/*.md</code> file, <code>/cso</code>'s own procedure text once shared boilerplate is subtracted) was specific and non-templated. Cannot claim total coverage given the repo's size.</td>
+<td>Small, fully-sampled, and consistently real — no templating found anywhere in the 14 skills read</td>
+</tr>
+<tr>
+<td><strong>Test/eval rigor</strong></td>
+<td>46 unit tests + 80-case hook fixture matrix, all passing, genuinely adversarial in content (symlink escape, IFS obfuscation, BOM handling)</td>
+<td>~7,400 tests; after subtracting environment-only failures (no browser binaries, no <code>.git</code>, root-user permission bypass, one stray-file contamination I traced to ground truth), no confirmed product-level failures found</td>
+<td>Fast unit/integration tests pass; the real behavioral rigor (LLM-driven skill-triggering evals) lives in an external harness not shipped in this tree and genuinely untestable here — reported as such, not guessed at</td>
+</tr>
+<tr>
+<td><strong>General engineering hygiene</strong></td>
+<td>TS strict mode, clean compile, zero runtime deps, careful install-path documentation; lint tool exists but is blind to its most important case</td>
+<td>Large but disciplined: dated bug-fix comments, real TODOS.md with issue numbers and effort estimates, honest doc/behavior match on the egress ledger's limits; one self-exemption in its own security tool</td>
+<td>Disciplined contribution process (94% PR rejection rate, mandatory disclosure of AI authorship), 1,400-line real release history; smallest surface area, easiest to fully audit</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="genuinely-uncertain-untestable-from-static-analysis">Genuinely uncertain / untestable from static analysis</h2>
+<ul>
+<li><strong>Whether any of the three actually improves outcomes in a live agentic session.</strong> All three make claims that only resolve inside a real Claude Code (or equivalent) session with a real model: sage-mode's premise-challenge consult actually changing a roadmap's shape, gstack's <code>/cso</code> actually finding real vulnerabilities at its stated 8/10 confidence bar without drowning users in false positives at scale, superpowers' skills actually auto-triggering on the right natural-language phrasing per its <code>tests/explicit-skill-requests/</code> suite. None of this can be verified by reading files; I did not attempt to guess at outcomes.</li>
+<li><strong>gstack's Playwright/browser-dependent test suite</strong> (roughly a third of the raw failure count) is untestable in this sandbox because no Chromium binary is installed and I could not fetch one; I cannot make a claim about the <code>/browse</code> mechanism's real-world correctness beyond what the source and its non-browser unit tests show.</li>
+<li><strong>superpowers' <code>superpowers-evals</code> harness</strong> is explicitly external (a separate repo cloned into <code>evals/</code> per its own README) and not present in this shipped tree at all — its actual eval rigor is unverifiable from what was provided, and the project is honest about that rather than shipping a stub in its place.</li>
+<li><strong>sage-mode-plugin's Lane B consult mechanism</strong> (<code>claude -p</code> subprocess dispatch with role-specific system prompts) is exercised by unit tests only in a mocked/degraded-path sense (<code>consult degrades with exit 3 when claude is absent</code>); the actual multi-model consult round-trip is not something I could exercise without a live <code>claude</code> CLI and billing context.</li>
+<li><strong>gstack's productivity claims and Karpathy-anecdote framing</strong> in the README are unfalsifiable from the repo and were treated as marketing color, not evidence, in this review — I neither confirmed nor assumed them false, I simply didn't let them influence the code-quality verdict either way.</li>
+<li><strong>Whether sage-mode's <code>skills/catalog</code> stubs are meaningfully harmful in practice</strong> is somewhat softer than it sounds: they're <code>disable-model-invocation: true</code> and retrieved only via <code>sage-recall</code> ranking, so a user who never triggers that retrieval path never sees them. But when they <em>are</em> retrieved, the file delivered is generic boilerplate, not the domain-specific procedure its name and description promise — and 25 topics is a lot of surface area for that gap to matter across a project's lifetime.</li>
+</ul>
+  <div class="foot">sage-mode notebook · rendered 2026-08-25</div>
+</main>
+<aside class="toc"><div class="toc-h">On this page</div><a href="#verdict">Verdict</a><a href="#sage-mode-plugin">sage-mode-plugin</a><a href="#gstack">gstack</a><a href="#superpowers">superpowers</a><a href="#head-to-head-by-dimension">Head-to-head, by dimension</a><a href="#genuinely-uncertain-untestable-from-static-analysis">Genuinely uncertain / untestable from static analysis</a></aside>
+</div>
+<script src="../assets/mermaid.min.js"></script>
+<script>
+(function(){
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try {
+    mermaid.initialize({
+      startOnLoad:true,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: dark
+        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
+             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
+        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
+             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
+      flowchart:{ curve:'basis', htmlLabels:true }
+    });
+  } catch(e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# NOTEBOOK-ROOT LITERALS allowlist.
+#
+# lib/util.ts's projectDocsDir() resolves the notebook root from
+# .sage/config.json's notebook.root (default "docs"). Every line below is a
+# skill that hardcodes one of the two headline offending forms
+# (docs/roadmap.{md,html} or docs/sprints/NN…) straight into its prose
+# instead — so a project that configures a different notebook.root gets an
+# instruction that points at the wrong path.
+#
+# This list must only ever SHRINK. A fix that stops hardcoding one of these
+# paths removes its line; nothing should ever need to be ADDED — a new
+# hardcode in a skill that isn't already on this list fails
+# test/conventions.test.ts instead of being silently allowlisted. If a line
+# here no longer matches an actual occurrence (because it was fixed), that
+# same test fails too, as a prompt to delete the stale line — so the list
+# stays an accurate, shrinking work queue rather than drifting from reality.
+#
+# Format: one offender per line, "<file relative to plugin root>: <literal>".
+# Blank lines and lines starting with # are ignored.

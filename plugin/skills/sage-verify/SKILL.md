@@ -18,8 +18,15 @@ on the good model is strictly better than putting both halves on either lane
 alone.
 
 **Reads:** the branch, the sprint spec's verification profile,
-`profiles/<profile>.json`. **Writes:** `docs/sprints/NN/evidence/`.
+`profiles/<profile>.json`. **Writes:** `<notebook>/sprints/NN/evidence/`
+(`<notebook>` is the configured notebook root, `docs/` by default — see
+`rules/sage-conduct.mdc`).
 **Runs:** `qa-driver` (Lane A), `qa-analyst` (Lane B).
+
+**Conduct.** Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it
+automatically; on a host without an always-applied rules mechanism (Claude
+Code), the operator must get its content into the session some other way
+(e.g. folded into the project's `CLAUDE.md`) before running this skill.
 
 ## Procedure
 
@@ -32,10 +39,26 @@ alone.
    `web`) for the exact check list of `api`, `cli`, and `ai-product`.
 
 2. **Every required check must produce an artifact, no exceptions.** A
-   non-browser check (`suite`, `typecheck`) runs through `sage evidence run
-   --label <id> -- <command>` — the evidence wrapper — which tees output to a
-   capped log and writes a wtree-fingerprinted record; that record *is* the
-   artifact. **A check with no artifact under `evidence/` did not run.** A
+   non-browser check with a `command` field (`suite`, `typecheck`, and —
+   `api`/`cli`/`ai-product` profiles — `contract`, `migrations`, `errors`,
+   `golden`, `sandbox`, `ttfs`, `evals`, `prompts`) runs through `sage
+   evidence run --label <id> -- <command>` — the evidence wrapper — which
+   tees output to a capped log and writes a wtree-fingerprinted record; that
+   record *is* the artifact. **`sage evidence run` refuses to start if
+   `.sage/` or `.worktrees/` aren't gitignored** — its own writes would land
+   inside the fingerprint the freshness check reads later and grade every
+   subsequent check STALE forever. Fix `.gitignore`, or pass
+   `--allow-unignored` knowing this run's evidence can never grade FRESH.
+   **Resolve a `${verify.X}` placeholder by reading
+   the matching key from `.sage/config.json`'s `verify` object** (written by
+   `sage-setup`; `tests`/`typecheck`/`build` always get a default, the
+   profile-specific keys only if a prior setup or the user supplied one —
+   there is no generic default for "run the migration-safety analysis" the
+   way `npm test` is a safe default for `tests`). **If the key is absent,
+   the check has no command and did not run** — say so plainly in the
+   evidence summary per step 8, the same as a missing artifact. Never invent
+   a command to fill the gap and never silently drop the check from the
+   report. **A check with no artifact under `evidence/` did not run.** A
    verbal "tests passed" with nothing on disk is not evidence, no matter who
    says it.
 
@@ -78,6 +101,14 @@ alone.
    artifact exists, the analyst's verdict, and any degradation. If any
    required check has no artifact, say the run is not verified — don't round
    a partial pass up to a clean one.
+
+## Non-interactive
+
+Nothing in this skill's own procedure blocks on a question — degradation
+(step 5) and severity gating (step 6) already resolve without a human; only
+the final ship/no-ship call lives outside this skill. Terminal: `Verify
+complete: all required checks have artifacts` / `Verify blocked: <check> has
+no artifact` / `Verify skipped: <reason>` (e.g. profile unresolved).
 
 ## Common Rationalizations
 

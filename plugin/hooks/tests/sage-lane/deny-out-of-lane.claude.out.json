@@ -1,0 +1,1 @@
+{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "[lane] src/web/x.ts is outside owns ['src/api/**']. Request a lane amendment rather than retry."}, "decision": "block", "reason": "[lane] src/web/x.ts is outside owns ['src/api/**']. Request a lane amendment rather than retry."}

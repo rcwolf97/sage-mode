@@ -16,6 +16,13 @@
         "matcher": "Write|Delete"
       }
     ],
+    "afterFileEdit": [
+      {
+        "command": "./sage-lane-after",
+        "type": "command",
+        "timeout": 5
+      }
+    ],
     "subagentStart": [
       { "command": "./sage-solo", "type": "command", "timeout": 5, "failClosed": true }
     ],

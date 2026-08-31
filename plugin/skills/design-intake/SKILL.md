@@ -62,7 +62,7 @@ Cap is 900 lines like `sage-shape` because the interrogation content **is** the 
 
 3. **Synthesize the tension back to the user** before writing anything — read back the one-word pair, the admired mechanisms, and the anti-references, and get an explicit "yes, that's right" before drafting.
 
-4. **Write `docs/design/brief.md`.** No template file exists for this yet — write it directly, one section per question above: Purpose & stakes; Audience (the specific person, device, state of mind, before/after); Feeling (the word pair and the named tension); Admired (three, each with its mechanism); Anti-references (three); Friend test; Brand assets (fixed vs. negotiable); Constraints; Content reality; Success signal. A re-run amends this file and marks superseded sections rather than deleting them, same discipline as `docs/roadmap.md`.
+4. **Write `docs/design/brief.md`.** No template file exists for this yet — write it directly, one section per question above: Purpose & stakes; Audience (the specific person, device, state of mind, before/after); Feeling (the word pair and the named tension); Admired (three, each with its mechanism); Anti-references (three); Friend test; Brand assets (fixed vs. negotiable); Constraints; Content reality; Success signal. A re-run amends this file and marks superseded sections rather than deleting them, same discipline as `<notebook>/roadmap.md` (`<notebook>` is the configured notebook root, `docs/` by default).
 
 5. **Append `docs/design/taste.md`.** New entry: date, project, the one-word feeling pair and its tension, the three anti-references. This is what every later Art Director and every future intake reads first — it is the record that stops the tenth project looking like the first.
 

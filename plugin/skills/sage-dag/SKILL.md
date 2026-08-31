@@ -97,6 +97,24 @@ the other and so never actually runs alongside it. See
 `references/glob-intersection.md` if a `sage dag lanes` violation names an
 overlap that isn't obvious from reading the globs.
 
+## Conduct
+
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
+on a host without an always-applied rules mechanism (Claude Code), the
+operator must get its content into the session some other way (e.g. folded
+into the project's `CLAUDE.md`) before running this skill.
+
+## Non-interactive
+
+Step 7's gate has no one to answer it. If the validated graph carries no
+`verify: "none"` node and no `risk: high` node, set `readiness:
+implementation-ready` and proceed unapproved — those two conditions are
+exactly what the gate exists to surface for a human, so their absence is a
+safe default. If either is present, stop before setting `readiness` and
+report it rather than guessing at an approval. Terminal: `Dag complete:
+graph validated, readiness set` or `Dag blocked: <node id> needs
+verify/risk review`.
+
 ## Common Rationalizations
 
 | Rationalization | Reality |

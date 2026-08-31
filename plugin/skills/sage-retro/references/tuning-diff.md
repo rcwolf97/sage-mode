@@ -1,6 +1,6 @@
 # Tuning diff: expected shape
 
-**Trigger:** load this while preparing the tuning diff in step 7 of
+**Trigger:** load this while preparing the tuning diff in step 8 of
 `SKILL.md`.
 
 ## What "a diff" means here
@@ -19,7 +19,7 @@ approving a specific edit, not a proposal to edit something later.
 
 ## Where the row text comes from
 
-Not invented for the occasion. Step 6 of `SKILL.md` says to pull it from an
+Not invented for the occasion. Step 7 of `SKILL.md` says to pull it from an
 actual transcript or blocker text — trace the proposed row back to the
 specific node, sprint, and ledger entry that produced it, and say so in the
 decision brief presenting the diff, the way the example row above cites

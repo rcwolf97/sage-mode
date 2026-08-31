@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { git, gitRoot, projectSageDir } from "../util.js";
+import { loadDag, expandAgainstTree } from "../dag/index.js";
+import { parseJsonl } from "../review/index.js";
 const STATUS = [
     "pending",
     "claimed",
@@ -108,7 +110,51 @@ export function loadLedger(sprint, root) {
     const p = ledgerPath(sprint, root);
     if (!existsSync(p))
         return null;
-    return parseLedger(readFileSync(p, "utf8"));
+    const text = readFileSync(p, "utf8");
+    // parseLedger is deliberately lenient (every field falls back to "" / 0 /
+    // [] rather than throwing) so a still-being-written or oddly-formatted
+    // ledger doesn't crash a reader mid-write. But that leniency means an
+    // empty, truncated, or otherwise unparseable file — existsSync sees it,
+    // so the "no ledger" branch above never fires — produces a fully-formed,
+    // *valid-looking* empty Ledger instead of a signal that something is
+    // wrong. That is a real false-PASS risk for a caller like
+    // evaluateCircuitBreakerForSprint: a corrupted ledger.md (crashed
+    // mid-write, a concurrent-write race, a zero-byte file) would otherwise
+    // mechanically score as a clean wtf:0/stopAndAsk:false rather than
+    // raising the same loud failure a genuinely missing ledger gets.
+    //
+    // The bar deliberately stays low — any recognizable `## ` section heading
+    // — rather than requiring the exact renderLedger() header line, so a
+    // hand-authored or intentionally-terse ledger fixture (real ones in the
+    // wild, and in this codebase's own CLI tests) that a human clearly meant
+    // as ledger content still loads normally. What it excludes is content
+    // with no markdown structure at all: an empty file, or binary/garbage
+    // bytes from a crash or partial write.
+    if (!/^## /m.test(text))
+        return null;
+    return parseLedger(text);
+}
+export class LedgerNotFoundError extends Error {
+    code = "no-ledger";
+    sprint;
+    expectedPath;
+    constructor(sprint, expectedPath) {
+        super(`no ledger for sprint ${sprint} at ${expectedPath} — run /sage-build first`);
+        this.name = "LedgerNotFoundError";
+        this.sprint = sprint;
+        this.expectedPath = expectedPath;
+    }
+}
+/** Same lookup as `loadLedger`, but throws `LedgerNotFoundError` instead of
+ * returning `null` when the sprint has no ledger yet. Use this at any call
+ * site where "no ledger" is a hard stop that must be reported, not a state
+ * the caller has real logic for — `loadLedger` stays available, unchanged,
+ * for callers (like `next()`, below) that do have one. */
+export function loadLedgerOrThrow(sprint, root) {
+    const l = loadLedger(sprint, root);
+    if (!l)
+        throw new LedgerNotFoundError(sprint, ledgerPath(sprint, root));
+    return l;
 }
 export function saveLedger(l, root) {
     const p = ledgerPath(l.sprint, root);
@@ -181,6 +227,151 @@ export function activeSprint(root) {
     }
     return dirs.at(-1) || null;
 }
-void git;
-void gitRoot;
-void existsSync;
+/** gstack's exact formula (skills/sage-build/SKILL.md step 6), as a pure
+ * function: start at 0, +15 per revert, +5 per fix touching more than 3
+ * files, +1 per fix after the 15th, +10 if every remaining finding is Low
+ * severity, +20 per out-of-lane file touch. No signal here is a judgment
+ * call — see `WtfSignals` for how each is mechanically sourced when this is
+ * called via `evaluateCircuitBreaker`/`deriveWtfSignals` against a real
+ * sprint. */
+export function computeWtf(signals) {
+    const revertPoints = signals.reverts * 15;
+    const fileSpreadPoints = signals.fixesOverThreeFiles * 5;
+    const fixCountPoints = Math.max(0, signals.totalFixes - 15) * 1;
+    const lowFindingsPoints = signals.allRemainingFindingsLow ? 10 : 0;
+    const outOfLanePoints = signals.outOfLaneTouches * 20;
+    const score = revertPoints + fileSpreadPoints + fixCountPoints + lowFindingsPoints + outOfLanePoints;
+    return {
+        score,
+        breakdown: { revertPoints, fileSpreadPoints, fixCountPoints, lowFindingsPoints, outOfLanePoints },
+        stopAndAsk: score > 20,
+        hardCapReached: signals.totalFixes >= 50,
+    };
+}
+// git's own auto-generated revert subject (`git revert` with `--edit`
+// defaults to `Revert "<original subject>"`) and its auto-inserted body
+// trailer (present whether or not the subject was edited). Matching either
+// is matching something git itself wrote, not something the agent typed.
+const REVERT_SUBJECT = /^revert\b/i;
+const REVERT_TRAILER = /^this reverts commit [0-9a-f]{7,40}\.?\s*$/im;
+/** Pulls `WtfSignals` from real repo state: per-node branches (the
+ * `sprint/<sprint>-<id>` convention lib/dag/index.ts's `worktree()`
+ * function creates), dag.json's declared `owns` globs, and the sprint's
+ * findings.jsonl. Best-effort and fails closed toward zero signals — never
+ * throws. A node whose branch no longer exists (deleted after a clean join,
+ * or never dispatched yet) or a dag.json that fails to load simply
+ * contributes nothing, exactly like a node that hasn't built anything. */
+export function deriveWtfSignals(l, root) {
+    const cwd = root || gitRoot() || process.cwd();
+    let dag = null;
+    if (l.plan) {
+        const dagPath = isAbsolute(l.plan) ? l.plan : join(cwd, l.plan);
+        try {
+            if (existsSync(dagPath))
+                dag = loadDag(dagPath);
+        }
+        catch {
+            dag = null;
+        }
+    }
+    const nodeIds = dag ? dag.nodes.map((n) => n.id) : Object.keys(l.nodes);
+    let reverts = 0;
+    let fixesOverThreeFiles = 0;
+    let totalFixes = 0;
+    let outOfLaneTouches = 0;
+    for (const id of nodeIds) {
+        const node = dag?.nodes.find((n) => n.id === id);
+        // Per-node branch naming convention from lib/dag/index.ts's worktree():
+        // `git worktree add -B sprint/${dag.sprint}-${nodeId} dir dag.base`.
+        const branch = `sprint/${l.sprint}-${id}`;
+        if (!l.base || git(["rev-parse", "--verify", branch], cwd).status !== 0)
+            continue;
+        const log = git(["log", "--reverse", "--format=%H", `${l.base}..${branch}`], cwd);
+        if (log.status !== 0)
+            continue;
+        const shas = log.stdout
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        for (const sha of shas) {
+            totalFixes++;
+            const msg = git(["show", "-s", "--format=%B", sha], cwd).stdout;
+            const subject = msg.split("\n")[0] || "";
+            if (REVERT_SUBJECT.test(subject) || REVERT_TRAILER.test(msg)) {
+                reverts++;
+                continue;
+            }
+            const diff = git(["diff-tree", "--no-commit-id", "--name-only", "-r", sha], cwd);
+            const files = diff.stdout
+                .split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean);
+            if (files.length > 3)
+                fixesOverThreeFiles++;
+            if (node) {
+                for (const f of files) {
+                    const inLane = node.owns.some((g) => expandAgainstTree(g, [f]).includes(f));
+                    if (!inLane)
+                        outOfLaneTouches++;
+                }
+            }
+        }
+    }
+    return {
+        reverts,
+        fixesOverThreeFiles,
+        totalFixes,
+        allRemainingFindingsLow: remainingFindingsAllLow(l.sprint, cwd),
+        outOfLaneTouches,
+    };
+}
+/** Path to the sprint's findings.jsonl. Design choice: co-located with
+ * ledger.md/board/ under `.sage/sprints/<sprint>/`, matching where
+ * evidence.jsonl already lives per agents/implementer-*.md ("Evidence
+ * record via `sage evidence run` (`.sage/sprints/NN/evidence.jsonl`)") —
+ * findings.jsonl is the same kind of internal, machine-written JSONL
+ * artifact, distinct from the rendered docs/sprints/NN-<slug>/review.{md,html}
+ * meant for humans. If a future sage-review revision writes findings.jsonl
+ * somewhere else, this is the one place to update. */
+export function findingsPath(sprint, root) {
+    return join(projectSageDir(root), "sprints", sprint, "findings.jsonl");
+}
+// findings.jsonl carries no resolved/fixed flag in its schema (see
+// lib/review/index.ts's Finding type), so this reads the file's *current*
+// contents as the remaining set — valid as long as sage-review overwrites
+// (rather than appends to) the file on each re-review pass, which is the
+// existing fix-cycle contract in skills/sage-build/SKILL.md step 4
+// ("findings loop back to the Implementer for a fix; bound fix cycles at
+// 3"). An empty or missing file means "no data", not "all low" — it must
+// NOT award the +10% just because nothing has been recorded yet, or every
+// freshly-reviewed node with zero findings would trip the signal for no
+// reason.
+function remainingFindingsAllLow(sprint, root) {
+    const p = findingsPath(sprint, root);
+    if (!existsSync(p))
+        return false;
+    let findings;
+    try {
+        findings = parseJsonl(readFileSync(p, "utf8"));
+    }
+    catch {
+        return false;
+    }
+    if (findings.length === 0)
+        return false;
+    return findings.every((f) => f.severity === "NITPICK");
+}
+/** One-call convenience: derive signals from real repo state, then score
+ * them. This is the mechanism skills/sage-build/SKILL.md step 6 refers to —
+ * the Eng Manager must call this rather than writing a number into the
+ * ledger's Circuit section by hand. */
+export function evaluateCircuitBreaker(l, root) {
+    return computeWtf(deriveWtfSignals(l, root));
+}
+/** One-call convenience for the `sage board wtf` call site specifically:
+ * loads the sprint's ledger (throwing `LedgerNotFoundError` — see
+ * `loadLedgerOrThrow` — rather than returning something the CLI can
+ * mistake for a clean zero score) and scores it in one step. */
+export function evaluateCircuitBreakerForSprint(sprint, root) {
+    return evaluateCircuitBreaker(loadLedgerOrThrow(sprint, root), root);
+}
