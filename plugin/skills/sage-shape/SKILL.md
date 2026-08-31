@@ -24,7 +24,7 @@ Ground before interrogating, because the notebook may already contain the answer
 
 ### 1. Ground
 
-Before asking anything, read `docs/preferences/`, the existing `<notebook>/roadmap.md` if one exists, and run `sage recall "<initial framing>" --kind learning`. (`<notebook>` is the configured notebook root, `docs/` by default — see `rules/sage-conduct.mdc`.) Never start cold when the notebook already has context. A prior retro may have already recorded that this exact kind of feature under-delivered last time, that this user's stated preference is "narrowest possible wedge, always," or that a similar demand claim turned out to be interest rather than demand once it shipped. Surfacing that context early changes which follow-ups you need and which you can skip — you do not need to re-litigate a preference the notebook already states plainly, only confirm it still holds.
+Before asking anything, read `docs/preferences/`, the existing `<notebook>/roadmap.md` if one exists, and run `sage recall "<initial framing>" --kind learning` and `sage recall "<initial framing>" --kind out-of-scope`. (`<notebook>` is the configured notebook root, `docs/` by default — see `rules/sage-conduct.mdc`.) Never start cold when the notebook already has context. An out-of-scope hit is a previously rejected concept — do not re-propose it without naming the reject. A prior retro may have already recorded that this exact kind of feature under-delivered last time, that this user's stated preference is "narrowest possible wedge, always," or that a similar demand claim turned out to be interest rather than demand once it shipped. Surfacing that context early changes which follow-ups you need and which you can skip — you do not need to re-litigate a preference the notebook already states plainly, only confirm it still holds.
 
 If `<notebook>/roadmap.md` already exists, this run is a re-run, not a fresh intake — see the amendment rules at the end of step 6. Read the existing roadmap in full, including its premise-challenge and out-of-scope sections, before asking the user anything. Re-asking a question the existing roadmap already answered wastes the user's patience and signals you skipped the ground step. Where the framing has clearly moved on (a pivot, a new user segment, a scrapped wedge), say so and confirm which parts of the old roadmap still hold before treating anything as settled.
 
@@ -339,7 +339,7 @@ The "before" version could describe almost any feature in almost any product; it
 
 ### 7. Render
 
-Run `sage notebook render <notebook>/roadmap.md`, then `sage notebook index`. A roadmap that only exists as unrendered markdown is not done — both the gate in step 8 and the completion condition at the end of this file require the rendered HTML to actually exist and render without error. After any amendment on a re-run, re-render; a stale `<notebook>/roadmap.html` that no longer matches the markdown is worse than no HTML at all, because it actively misleads a reader who trusts it.
+Run `sage notebook render <notebook>/roadmap.md`, then `sage notebook index`. A roadmap that only exists as unrendered markdown is not done — both the gate in step 8 and the completion condition at the end of this file require the rendered HTML to actually exist and render without error. After any amendment on a re-run, re-render; a stale `<notebook>/roadmap.html` that no longer matches the markdown is worse than no HTML at all, because it actively misleads a reader who trusts it. Advisory, non-blocking: `sage review doc` on the roadmap (checklist `skills/sage-review/references/checklists/design-doc.md`). Unavailable reviewer → one-line notice, do not block the gate.
 
 ### 8. Gate
 
@@ -353,10 +353,8 @@ A roadmap approval is rarely a clean binary in practice. If the user approves mo
 
 ## Conduct
 
-Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
-on a host without an always-applied rules mechanism (Claude Code), the
-operator must get its content into the session some other way (e.g. folded
-into the project's `CLAUDE.md`) before running this skill.
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically
+every session. sage-mode is Cursor-only.
 
 ## Non-interactive
 

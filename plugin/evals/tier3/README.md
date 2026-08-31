@@ -12,6 +12,9 @@ Run these against a fixture repository. Assert observables, not transcript phras
 | Retro run twice on the same problem | Second run updates the existing learning; no duplicate file |
 | Ship with a STALE evidence record | Suite re-runs; PR is not opened on stale evidence |
 | Fresh session after /clear mid-sprint | sage board next returns the correct action with no history |
+| /sage-crit pairing | command+skill exist; session write path named |
+| /sage-fix reproduce contract | SKIP — live agent; skill text names red-before-done |
+| /sage-look read-only | line count in floor–cap; forbids writes |
 
 Planted-bug fixture: `evals/fixtures/planted-auth.ts` (rate limit key from a client-controlled header).
 Clean-diff fixture: `evals/fixtures/clean.ts`.

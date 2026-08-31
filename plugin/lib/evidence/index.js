@@ -143,8 +143,19 @@ function trackedMtimeFingerprint(cwd) {
 }
 export function evidencePath(root, sprintId) {
     const sage = projectSageDir(root);
+    if (sprintId === "session") {
+        return join(sage, "evidence", "session", "evidence.jsonl");
+    }
     const sprint = activeSprintDir(root, sprintId);
     return join(sprint || join(sage, "sprints", "00"), "evidence.jsonl");
+}
+export function findingsPath(root, sprintId) {
+    const sage = projectSageDir(root);
+    if (sprintId === "session") {
+        return join(sage, "findings", "session", "findings.jsonl");
+    }
+    const sprint = activeSprintDir(root, sprintId);
+    return join(sprint || join(sage, "sprints", "00"), "findings.jsonl");
 }
 // NOTE: `sprintId`, when given, is used explicitly instead of falling back to
 // "lexicographically last" — this is what lets `evidence check`/`run` target
@@ -217,7 +228,7 @@ export async function run(opts) {
     const cmdStr = opts.command.join(" ");
     const cmdHash = sha256(cmdStr);
     const sage = projectSageDir(cwd);
-    const sprint = activeSprintDir(cwd, opts.sprintId) || join(sage, "sprints", "00");
+    const sprint = opts.sprintId === "session" ? join(sage, "evidence", "session") : activeSprintDir(cwd, opts.sprintId) || join(sage, "sprints", "00");
     const logsDir = join(sprint, "logs");
     try {
         mkdirSync(logsDir, { recursive: true });
@@ -279,6 +290,7 @@ export async function run(opts) {
         dirty,
         log_path: logPath,
         node: opts.node,
+        grade: opts.grade,
     };
     // Both fingerprints must agree the tree was untouched: content (wtree)
     // AND mtime (trackedMtimeFingerprint, the TOCTOU-sharpening check above).
@@ -288,7 +300,7 @@ export async function run(opts) {
         rec.wtree = after;
     }
     try {
-        const ledger = join(sprint, "evidence.jsonl");
+        const ledger = evidencePath(cwd, opts.sprintId);
         mkdirSync(dirname(ledger), { recursive: true });
         appendFileSync(ledger, JSON.stringify(rec) + "\n");
     }
@@ -370,5 +382,21 @@ export function isTrusted(command, cwd) {
         return false;
     }
 }
+const GRADE_RANK = {
+    "verifier-blocked": 0,
+    "type-check-only": 1,
+    "unit-test-verified": 2,
+    "live-verified": 3,
+};
+export function meetsMinimumGrade(record, minimum) {
+    if (!record.grade)
+        return false;
+    return GRADE_RANK[record.grade] >= GRADE_RANK[minimum];
+}
+/** Runtime acceptance text cannot be closed by a type-check-only record. */
+export function refuseTypeCheckOnlyForRuntime(acceptance, grade) {
+    if (grade !== "type-check-only")
+        return false;
+    return /return|render|exit|http|browser|click|runtime|live|request/i.test(acceptance);
+}
 void createHash;
-void evidencePath;

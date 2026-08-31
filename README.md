@@ -31,7 +31,6 @@ Then **Developer: Reload Window**. Enable *Include third-party Plugins, Skills, 
 | Cursor | ≥ 3.14 | Hard requirement |
 | Node.js | ≥ 20 | CLI, notebook, evidence, recall unavailable |
 | git | ≥ 2.38 | Hard requirement |
-| Claude Code CLI | ≥ 2.1 (optional) | Product/QA-analyst fall back to Lane A with a warning |
 | GitHub CLI `gh` | ≥ 2.0 (optional) | `/sage-ship` prints the PR body instead of opening it |
 
 ## Commands

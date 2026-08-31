@@ -16,6 +16,6 @@
     "noUnusedParameters": false,
     "types": ["node"]
   },
-  "include": ["lib/**/*.ts", "test/**/*.ts"],
+  "include": ["lib/**/*.ts", "test/**/*.ts", "evals/tier3/**/*.ts"],
   "exclude": ["lib/vendor", "node_modules"]
 }

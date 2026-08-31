@@ -24,9 +24,7 @@ alone.
 **Runs:** `qa-driver` (Lane A), `qa-analyst` (Lane B).
 
 **Conduct.** Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it
-automatically; on a host without an always-applied rules mechanism (Claude
-Code), the operator must get its content into the session some other way
-(e.g. folded into the project's `CLAUDE.md`) before running this skill.
+automatically every session. sage-mode is Cursor-only.
 
 ## Procedure
 

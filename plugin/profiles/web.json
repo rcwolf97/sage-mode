@@ -1,16 +1,17 @@
 {
   "name": "web",
   "checks": [
-    { "id": "suite", "command": "${verify.tests}", "required": true },
-    { "id": "typecheck", "command": "${verify.typecheck}", "required": true },
+    { "id": "suite", "command": "${verify.tests}", "required": true, "minimumGrade": "unit-test-verified" },
+    { "id": "typecheck", "command": "${verify.typecheck}", "required": true, "minimumGrade": "type-check-only" },
     {
       "id": "viewports",
       "kind": "browser",
       "widths": [390, 768, 1024, 1440, 1920],
       "capture": ["screenshot", "console"],
-      "required": true
+      "required": true,
+      "minimumGrade": "live-verified"
     },
-    { "id": "stories", "kind": "browser-walkthrough", "source": "spec.acceptance", "required": true },
+    { "id": "stories", "kind": "browser-walkthrough", "source": "spec.acceptance", "required": true, "minimumGrade": "live-verified" },
     { "id": "a11y", "kind": "design-critique", "gate": ["Blocker", "High"] }
   ]
 }

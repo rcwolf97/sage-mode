@@ -148,7 +148,27 @@ function scenario2(): void {
     assertTrue(plantedLine, "fixture setup: planted-auth.ts must contain the planted line");
     const out = runCli(["review", "gate", "--json"], { input });
     assertTrue(out.status === 0, `review gate exited ${out.status}: ${out.stderr}`);
-    const findings = JSON.parse(out.stdout) as { severity: string; confidence: number; evidence: string }[];
+    // `review gate --json` emits an ENVELOPE — { findings, rejected } — not a
+    // bare array. Reading `out.stdout` as an array made `findings.length`
+    // `undefined`, so this scenario reported FAIL against a gate that was
+    // behaving correctly the whole time. Assert on `rejected` too: a row the
+    // gate silently dropped would otherwise look identical to a row it never
+    // received, which is the exact "absence of proof is not proof of absence"
+    // shape §8.7 exists to forbid.
+    const envelope = JSON.parse(out.stdout) as {
+      findings?: { severity: string; confidence: number; evidence: string }[];
+      rejected?: unknown[];
+    };
+    assertTrue(
+      Array.isArray(envelope.findings),
+      `expected a { findings, rejected } envelope from \`review gate --json\`, got: ${out.stdout.slice(0, 200)}`,
+    );
+    const findings = envelope.findings!;
+    const rejected = envelope.rejected ?? [];
+    assertTrue(
+      rejected.length === 0,
+      `expected the fixture row to be well-formed, but the gate rejected ${rejected.length}: ${JSON.stringify(rejected)}`,
+    );
     assertTrue(findings.length === 1, `expected exactly 1 finding to survive gate, got ${findings.length}`);
     const f = findings[0]!;
     assertTrue(f.severity === "CRITICAL", `expected CRITICAL severity, got ${f.severity}`);
@@ -385,6 +405,50 @@ function scenario8(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Spine B commands — mechanical surface. Live agent dispatch is SKIP.
+// ---------------------------------------------------------------------------
+function scenario9(): void {
+  const id = "9";
+  const title = "/sage-crit command+skill pairing and session write paths exist";
+  try {
+    const cmd = join(PLUGIN_ROOT, "commands", "sage-crit.md");
+    const skill = join(PLUGIN_ROOT, "skills", "sage-crit", "SKILL.md");
+    assertTrue(existsSync(cmd) && existsSync(skill), "sage-crit command and skill missing");
+    const body = readFileSync(skill, "utf8");
+    assertTrue(body.includes(".sage/reviews/") && body.includes("session"), "session write path not named");
+    record(id, title, "PASS", "command+skill present; session path named");
+  } catch (e) {
+    record(id, title, "FAIL", (e as Error).message);
+  }
+}
+
+function scenario10(): void {
+  const id = "10";
+  const title = "/sage-fix requires a red reproduce before a done claim";
+  try {
+    const body = readFileSync(join(PLUGIN_ROOT, "skills", "sage-fix", "SKILL.md"), "utf8");
+    assertTrue(/Reproduce/.test(body) && /rung/.test(body) && /--session/.test(body), "sage-fix missing reproduce/rung/session");
+    record(id, title, "SKIP", "live reproduce+fix loop needs an agent turn; skill text names the contract");
+  } catch (e) {
+    record(id, title, "FAIL", (e as Error).message);
+  }
+}
+
+function scenario11(): void {
+  const id = "11";
+  const title = "/sage-look is read-only and under the line cap";
+  try {
+    const body = readFileSync(join(PLUGIN_ROOT, "skills", "sage-look", "SKILL.md"), "utf8");
+    const lines = body.split(/\r?\n/).length;
+    assertTrue(lines >= 25 && lines <= 250, `sage-look is ${lines} lines`);
+    assertTrue(/No writes/.test(body) || /does not write/.test(body), "sage-look must forbid writes");
+    record(id, title, "PASS", `${lines} lines, read-only`);
+  } catch (e) {
+    record(id, title, "FAIL", (e as Error).message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 function main(): void {
   scenario1();
@@ -395,6 +459,9 @@ function main(): void {
   scenario6();
   scenario7();
   scenario8();
+  scenario9();
+  scenario10();
+  scenario11();
 
   const width = Math.max(...results.map((r) => r.title.length));
   let failed = 0;

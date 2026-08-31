@@ -39,7 +39,7 @@ export interface Hit {
   snippet: string;
 }
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^a-z0-9]+/)
@@ -90,12 +90,21 @@ function indexFile(path: string, root: string, kindFallback: string): IndexDoc {
   };
 }
 
-export function buildIndex(opts?: { docsRoot?: string; skillsRoot?: string; cwd?: string }): RecallIndex {
+export function buildIndex(opts?: {
+  docsRoot?: string;
+  skillsRoot?: string;
+  scopeRoot?: string;
+  cwd?: string;
+}): RecallIndex {
   const docsRoot = opts?.docsRoot || projectDocsDir(opts?.cwd);
   const skillsRoot = opts?.skillsRoot || join(readSageHome() || "", "skills");
+  const scopeRoot = opts?.scopeRoot || join(projectSageDir(opts?.cwd), "out-of-scope");
   const docs = walk(docsRoot, (n) => n.endsWith(".md")).map((p) => indexFile(p, docsRoot, "note"));
   const skills = walk(skillsRoot, (n) => n === "SKILL.md").map((p) => indexFile(p, skillsRoot, "skill"));
-  const all = [...docs, ...skills];
+  const scope = existsSync(scopeRoot)
+    ? walk(scopeRoot, (n) => n.endsWith(".md")).map((p) => indexFile(p, scopeRoot, "out-of-scope"))
+    : [];
+  const all = [...docs, ...skills, ...scope];
   const df: Record<string, number> = {};
   for (const d of all) {
     for (const t of Object.keys(d.terms)) df[t] = (df[t] || 0) + 1;
@@ -105,7 +114,7 @@ export function buildIndex(opts?: { docsRoot?: string; skillsRoot?: string; cwd?
   return {
     version: 1,
     builtAt: new Date().toISOString(),
-    docs,
+    docs: [...docs, ...scope],
     skills,
     stats: { N, avgdl, df },
   };
@@ -129,7 +138,7 @@ function idf(term: string, N: number, df: Record<string, number>): number {
   return Math.log(1 + (N - n + 0.5) / (n + 0.5));
 }
 
-function bm25(query: string[], doc: IndexDoc, stats: RecallIndex["stats"]): number {
+export function bm25(query: string[], doc: IndexDoc, stats: RecallIndex["stats"]): number {
   let score = 0;
   const avgdl = stats.avgdl || 1;
   for (const t of query) {
@@ -175,7 +184,7 @@ export function dedupAppliesWhen(idx: RecallIndex, text: string, threshold = 0.5
   return hits.sort((a, b) => b.score - a.score).map((h) => h.d);
 }
 
-function overlap(a: string[], b: string[]): number {
+export function overlap(a: string[], b: string[]): number {
   if (!a.length || !b.length) return 0;
   const sb = new Set(b);
   const inter = a.filter((t) => sb.has(t)).length;

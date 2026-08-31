@@ -157,9 +157,19 @@ if [ "$IS_SIMPLE" = 1 ]; then
   # so it got neither a deny nor even the MEDIUM ask fallback. Detect the
   # force flag the same way -r/-f are detected for rm: scan every token's
   # short-option cluster, not just a couple of literal spellings.
+  # An adversarial check found `git -C <path> push --force ...` (git's -C
+  # global option inserted before the subcommand) matched neither this
+  # detection nor the MEDIUM-tier substring fallback below, so it sailed
+  # through as an allow. -C is by far the most common global option seen
+  # here in practice; detect past it specifically rather than writing a
+  # general git-global-option parser this hook doesn't otherwise need.
   IS_GIT_PUSH=0
   case "$CMD_TOK1" in
-    git) case "$CMD_TOK2" in push) IS_GIT_PUSH=1 ;; esac ;;
+    git)
+      SUBCMD="$CMD_TOK2"
+      [ "$CMD_TOK2" = "-C" ] && SUBCMD=${4:-}
+      case "$SUBCMD" in push) IS_GIT_PUSH=1 ;; esac
+      ;;
   esac
   if [ "$IS_GIT_PUSH" = 1 ]; then
     HAS_FORCE=0

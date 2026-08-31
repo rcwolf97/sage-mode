@@ -3,13 +3,35 @@ import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { consult, extractModelReceipt, recordLaneCDispatch, assertTrusted } from "../lib/consult/index.js";
+import { consult, extractModelReceipt, recordLaneCDispatch, assertTrusted, warnIfApiKeyInherited } from "../lib/consult/index.js";
 import { list as listEgress, verify as verifyEgress, egressPath } from "../lib/egress/index.js";
 import { redact } from "../lib/redact/index.js";
 import { sha256 } from "../lib/util.js";
 function tmp() {
     return mkdtempSync(join(tmpdir(), "sage-consult-"));
 }
+// --- hermeticity: this whole file runs against a virgin HOME -----------------
+//
+// Every consult() path starts at assertTrusted(), which reads the USER-level
+// ~/.sage/config.json through process.env.HOME (lib/util.ts's homeDir()).
+// Once that file exists, trust is governed by its trustedRoots list — so on
+// any machine where `sage setup` has ever been run, a test that dispatches
+// into a fresh mkdtemp cwd is refused before it reaches spawnSync, and the
+// assertions downstream ("expected at least the pre-flight egress row",
+// "content_sha256 matches the REDACTED payload", the ANTHROPIC_API_KEY
+// warning) all fail against code that is behaving exactly as designed.
+//
+// This bit for real: five tests in this file failed on a developer machine
+// after a single `sage setup` run, while CI stayed green — GitHub runners
+// have a virgin HOME, so the suite only ever exercised the first-run
+// permissive branch. A test suite whose result depends on whether the
+// developer has used the product is not a test suite.
+//
+// Redirecting HOME once, at module load before any test body runs, fixes it
+// for every test here including ones not yet written. The two tests that
+// manage HOME themselves via withHome() still override this locally and
+// restore back to it, which is the behaviour they want.
+process.env.HOME = mkdtempSync(join(tmpdir(), "sage-consult-home-"));
 // assertTrusted()/consult() resolve the user-level ~/.sage/config.json
 // through process.env.HOME (see lib/util.ts's homeDir()). Redirecting it for
 // the duration of a call isolates these tests from the real ~/.sage.
@@ -26,26 +48,16 @@ function withHome(dir, fn) {
             process.env.HOME = prev;
     }
 }
+const LIVE = process.env.SAGE_TEST_LIVE_CONSULT === "1";
 test("consult always returns a structured result and never throws, whatever the host's claude does", () => {
     const cwd = tmp();
-    // Deliberately does NOT enumerate the exit codes a real `claude` may return.
-    // An earlier version asserted `exit` was one of {0, 1, 3} and failed on a
-    // machine whose `claude` is a restricted wrapper that exits 2 on any
-    // invocation carrying sage's full argument set. That was the test being
-    // wrong, not the code: consult()'s contract is that it hands back a
-    // well-formed ConsultResult for the caller to branch on, never a throw and
-    // never a partially-populated object — the exit code itself belongs to
-    // whatever binary is installed and is not ours to pin.
-    const r = consult({ role: "product", prompt: "hello", cwd });
+    const r = withFakeClaudeOnPath(() => consult({ role: "product", prompt: "hello", cwd }));
     assert.equal(typeof r.ok, "boolean");
     assert.equal(typeof r.exit, "number");
     assert.equal(typeof r.text, "string");
     assert.ok(Number.isInteger(r.exit), "exit must be an integer");
-    // The one exit code we DO own: the degraded path is sage's own signal, not
-    // the child's, so it must always be 3.
     if (r.degraded)
         assert.equal(r.exit, 3);
-    // ok and a non-zero exit must never disagree.
     if (r.ok)
         assert.equal(r.exit, 0);
 });
@@ -58,12 +70,9 @@ test("consult always returns a structured result and never throws, whatever the 
 // child process: a real temp `cwd` is used throughout, and "claude absent"
 // is produced by genuinely emptying PATH for the duration of one call, not
 // by stubbing spawnSync.
-test("a real dispatch (claude present) records at least one egress row on a clean, verifiable chain", () => {
+test("a real dispatch (claude present) records at least one egress row on a clean, verifiable chain", { skip: LIVE ? false : "set SAGE_TEST_LIVE_CONSULT=1 to exercise a live claude dispatch" }, () => {
     const cwd = tmp();
     const r = consult({ role: "product", prompt: "hello from the egress wiring test", cwd });
-    // Whether or not the real CLI call itself succeeded (network/auth in this
-    // sandbox is not this test's concern), the attempt reached spawnSync, so
-    // the pre-flight row must exist.
     void r;
     const rows = listEgress(cwd);
     assert.ok(rows.length >= 1, "expected at least the pre-flight egress row");
@@ -110,7 +119,7 @@ test("recordLaneCDispatch redacts the payload, records a lane C / google row, an
 test("consult redacts the prompt before it is ever handed to the claude subprocess: the recorded content_sha256 matches the REDACTED payload, never the raw secret", () => {
     const cwd = tmp();
     const rawPrompt = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE — please review";
-    consult({ role: "product", prompt: rawPrompt, cwd });
+    withFakeClaudeOnPath(() => consult({ role: "product", prompt: rawPrompt, cwd }));
     const rows = listEgress(cwd);
     assert.ok(rows.length >= 1);
     const expectedHash = sha256(redact(rawPrompt).text);
@@ -172,6 +181,27 @@ test("a schema file's content is redacted before it is passed to the claude subp
     const schemaArg = args[idx + 1];
     assert.ok(!schemaArg.includes("AKIAIOSFODNN7EXAMPLE"), `schema content leaked unredacted: ${schemaArg}`);
     assert.ok(schemaArg.includes("«REDACTED:aws-key"), schemaArg);
+});
+test("consult never passes --bare to the claude CLI (bare mode bypasses subscription login)", () => {
+    const cwd = tmp();
+    const capturedArgsFile = withFakeClaudeOnPath((paths) => {
+        consult({ role: "product", prompt: "hello", cwd });
+        return paths.capturedArgsFile;
+    });
+    const args = JSON.parse(readFileSync(capturedArgsFile, "utf8"));
+    assert.ok(!args.includes("--bare"), `spawned argv must not contain --bare: ${JSON.stringify(args)}`);
+});
+test("architect consults are allowed Read,Grep,Glob plus scoped git diff/log", () => {
+    const cwd = tmp();
+    const capturedArgsFile = withFakeClaudeOnPath((paths) => {
+        consult({ role: "architect", prompt: "hello", cwd });
+        return paths.capturedArgsFile;
+    });
+    const args = JSON.parse(readFileSync(capturedArgsFile, "utf8"));
+    const idx = args.indexOf("--allowedTools");
+    assert.ok(idx >= 0, "expected --allowedTools");
+    const tools = args[idx + 1];
+    assert.equal(tools, "Read,Grep,Glob,Bash(git diff *),Bash(git log *)");
 });
 // extractModelReceipt: the Lane B analog of compound-engineering-plugin's
 // extract_model_receipt() / MODEL_ACTUAL="unverified" default — the design
@@ -257,7 +287,7 @@ test("consult warns on stderr when ANTHROPIC_API_KEY is inherited from the envir
         return origWrite(chunk, ...rest);
     };
     try {
-        consult({ role: "product", prompt: "hi", cwd });
+        withFakeClaudeOnPath(() => consult({ role: "product", prompt: "hi", cwd }));
     }
     finally {
         process.stderr.write = origWrite;
@@ -268,12 +298,31 @@ test("consult warns on stderr when ANTHROPIC_API_KEY is inherited from the envir
     }
     assert.match(captured, /METERED API BILLING/);
 });
+test("consult throws when SAGE_TEST_LIVE_CONSULT=1 and ANTHROPIC_API_KEY is set", () => {
+    const prevLive = process.env.SAGE_TEST_LIVE_CONSULT;
+    const prevKey = process.env.ANTHROPIC_API_KEY;
+    process.env.SAGE_TEST_LIVE_CONSULT = "1";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-fake-for-test";
+    try {
+        assert.throws(() => warnIfApiKeyInherited(), /ANTHROPIC_API_KEY is set/);
+    }
+    finally {
+        if (prevLive === undefined)
+            delete process.env.SAGE_TEST_LIVE_CONSULT;
+        else
+            process.env.SAGE_TEST_LIVE_CONSULT = prevLive;
+        if (prevKey === undefined)
+            delete process.env.ANTHROPIC_API_KEY;
+        else
+            process.env.ANTHROPIC_API_KEY = prevKey;
+    }
+});
 // --- an egress ledger write failure must never break consult() itself ---
 test("consult still completes normally when the egress ledger path is unwritable (a file sits where .sage/ needs to be a directory)", () => {
     const cwd = tmp();
     writeFileSync(join(cwd, ".sage"), "not a directory — mkdir(.sage) will fail inside record()");
     assert.doesNotThrow(() => {
-        const r = consult({ role: "product", prompt: "hello despite a broken ledger", cwd });
+        const r = withFakeClaudeOnPath(() => consult({ role: "product", prompt: "hello despite a broken ledger", cwd }));
         assert.ok(typeof r.ok === "boolean");
     });
 });

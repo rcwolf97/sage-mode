@@ -14,10 +14,13 @@ every other case on either host (Cursor never uses exit 2 for this; Claude
 Code's ask/allow/followup all stay on the exit-0 "parse stdout JSON" path).
 
 Prints "ok" and exits 0 on a match; prints a FAIL line with both sides and
-exits 1 otherwise.
+exits 1 otherwise. Empty stdout from the hook is the sentinel `__EMPTY__`
+(emitted by run.sh) — that is a crash/no-output, never an allow.
 """
 import json
 import sys
+
+EMPTY_SENTINEL = "__EMPTY__"
 
 
 def matches(exp, got):
@@ -32,8 +35,16 @@ def matches(exp, got):
 
 def main():
     exp_path, got_path, status_str = sys.argv[1], sys.argv[2], sys.argv[3]
-    exp = json.loads(open(exp_path).read() or "{}")
-    got = json.loads(open(got_path).read().strip() or "{}")
+    got_raw = open(got_path).read().strip()
+    if got_raw == EMPTY_SENTINEL or not got_raw:
+        print("FAIL", exp_path, "— hook produced NO output (parse error or crash?)")
+        sys.exit(1)
+    exp_raw = open(exp_path).read()
+    if not exp_raw.strip():
+        exp = {}
+    else:
+        exp = json.loads(exp_raw)
+    got = json.loads(got_raw)
     status = int(status_str)
 
     want_status = 2 if (isinstance(exp, dict) and exp.get("hookSpecificOutput", {}).get("permissionDecision") == "deny") else 0

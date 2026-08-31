@@ -145,6 +145,11 @@ export function warnIfApiKeyInherited(): void {
       "sage consult: warning: unset it before running sage — e.g. `unset ANTHROPIC_API_KEY` — or\n" +
       "sage consult: warning: remove the export from your shell profile if it is set there.\n",
   );
+  // Live-consult tests must never silently bill metered API rates. Production
+  // still warns and continues; the gated live test path fails the run.
+  if (process.env.SAGE_TEST_LIVE_CONSULT === "1") {
+    throw new Error("ANTHROPIC_API_KEY is set — refusing live consult under SAGE_TEST_LIVE_CONSULT=1");
+  }
 }
 
 // Egress-ledger recording for Lane B. Scope, spelled out because half of
@@ -262,7 +267,14 @@ export function consult(opts: {
     content_sha256: sha256(redacted.text + (redactedSchema?.text ?? "")),
     redactions: redacted.count + (redactedSchema?.count ?? 0),
   };
-  const args = ["-p", redacted.text, "--allowedTools", "Read,Grep,Glob", "--output-format", "json"];
+  const args = [
+    "-p",
+    redacted.text,
+    "--allowedTools",
+    "Read,Grep,Glob,Bash(git diff *),Bash(git log *)",
+    "--output-format",
+    "json",
+  ];
   if (existsSync(roleFile)) args.push("--append-system-prompt-file", roleFile);
   if (redactedSchema) args.push("--json-schema", redactedSchema.text);
   const sessionFile = join(projectSageDir(opts.cwd), "consult-session");

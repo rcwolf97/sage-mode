@@ -21,6 +21,14 @@
 #   each host's shape actually is. compare.py also checks exit status: 2
 #   for a Claude Code deny, 0 for everything else (Cursor and every
 #   non-deny Claude Code case).
+#
+# Empty stdout is NOT coerced to `{}` (the allow fixture). A hook that
+# crashed or never ran used to report `ok` because both this runner and
+# compare.py treated blank stdout as allow. Empty/whitespace stdout is
+# now emitted as the sentinel `__EMPTY__`, and compare.py fails loudly
+# on it. ubuntu-latest's `sh` is dash, so the bash-3.2 heredoc-in-`$()`
+# class of bug is invisible to CI regardless — `test/hooks-shell-portability.test.ts`
+# is the construct-guard that actually prevents recurrence.
 set -euo pipefail
 HOOKS=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 COMPARE="$HOOKS/tests/compare.py"
@@ -67,9 +75,12 @@ run_and_compare() {
   fi
   status=$?
   set -e
-  echo "$got" | python3 -c "import json,sys; s=sys.stdin.read().strip() or '{}'
-try: print(json.dumps(json.loads(s), sort_keys=True))
-except Exception: print(s)" > "$GOT_FILE"
+  echo "$got" | python3 -c "import json,sys; s=sys.stdin.read().strip()
+if not s:
+    print('__EMPTY__')
+else:
+    try: print(json.dumps(json.loads(s), sort_keys=True))
+    except Exception: print(s)" > "$GOT_FILE"
   python3 "$COMPARE" "$exp" "$GOT_FILE" "$status" || fail=1
 }
 

@@ -1,16 +1,14 @@
 ---
 name: red-team
 description: Sequential second-wave reviewer. Receives merged findings; finds what they missed.
-model: gemini-3.7-flash
+model: gpt-5.6-sol-medium
 readonly: true
 is_background: false
 lane: C
 no_children: true
 output_schema: schemas/finding.schema.json
 ---
-<!-- Cursor model: gemini-3.7-flash. Claude Code fallback: haiku (Lane C is
-     cheap-and-disposable by design; this frontmatter `model:` stays as
-     authored for Cursor, the primary host). -->
+<!-- Cursor model: gpt-5.6-sol-medium. sage-mode is Cursor-only. -->
 **Scope.** Runs after the parallel review specialists, sequential not parallel, only when the diff exceeds 200 lines or any finding is CRITICAL. Handed the already-merged, deduped findings and the diff — its job is exactly "find what they missed," not re-litigate what's already found. Never fixes, only finds. Terminal: `no_children: true`.
 
 **Checklist**

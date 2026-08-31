@@ -15,7 +15,7 @@ OUT="$DIR/out"
 mkdir -p "$OUT"
 
 fail=0
-for name in zz-spike02-declared-model zz-spike02-default-model; do
+for name in zz-spike02-declared-model zz-spike02-default-model zz-spike02-cursor-lane-c; do
   f="$AGENTS_DIR/$name.md"
   if [ ! -f "$f" ]; then
     echo "NOT INSTALLED: $f — run $DIR/install.sh first."
@@ -66,11 +66,26 @@ Verbatim response:
 (paste here)
 ```
 
-## zz-spike02-default-model (no model field)
+## zz-spike02-default-model (no model field) — CONTROL
 
 Dispatch prompt used: "Dispatch the zz-spike02-default-model subagent and report its exact response verbatim."
 
 Verbatim response:
+```
+(paste here)
+```
+
+## zz-spike02-cursor-lane-c (model: gemini-3.7-flash) — CURSOR, the one that matters
+
+This is the probe that answers the question the cost architecture rests on:
+does Cursor honor a NON-Anthropic `model:` pin shipped from a plugin's
+agents/ path? `gemini-3.7-flash` is the literal value agents/reviewer.md,
+agents/red-team.md and agents/design-critic.md already carry. Skip this one
+under Claude Code — the value is inert there by design.
+
+Dispatch prompt used: "Dispatch the zz-spike02-cursor-lane-c subagent and report its exact response verbatim."
+
+Verbatim response (or the exact dispatch error, which is an equally valid result):
 ```
 (paste here)
 ```
@@ -82,19 +97,26 @@ from whatever it used for the second)? State your evidence, not just a
 yes/no — this file is the record future readers will trust, so back the
 verdict with what you actually saw, not what you expected to see.
 TEMPLATE
-  echo "wrote $OUT/observations.md — fill it in after both dispatches."
+  echo "wrote $OUT/observations.md — fill it in after the dispatches."
 else
   echo "$OUT/observations.md already exists — not overwriting your notes."
 fi
 
 echo
-echo "Next: in your agent chat (the host you're testing), send these two"
+echo "Next: in your agent chat (the host you're testing), send these"
 echo "prompts ONE AT A TIME and record each verbatim response in"
 echo "$OUT/observations.md:"
 echo
-echo "  1. Dispatch the zz-spike02-declared-model subagent and report its exact response verbatim."
-echo "  2. Dispatch the zz-spike02-default-model subagent and report its exact response verbatim."
+echo "  1. Dispatch the zz-spike02-default-model subagent and report its exact response verbatim."
+echo "  2. Dispatch the zz-spike02-declared-model subagent and report its exact response verbatim."
+echo "  3. Dispatch the zz-spike02-cursor-lane-c subagent and report its exact response verbatim."
 echo
-echo "When done: $DIR/uninstall.sh to remove the two probe agent cards."
+echo "Prompt 1 is the CONTROL (no model: field). Prompt 2 answers the"
+echo "question for Claude Code (model: haiku). Prompt 3 answers it for"
+echo "CURSOR (model: gemini-3.7-flash) — that is the one the Lane A/B/C"
+echo "cost architecture actually depends on. In Cursor, run 1 and 3. In"
+echo "Claude Code, run 1 and 2; 3 will be inert there by design."
+echo
+echo "When done: $DIR/uninstall.sh to remove the probe agent cards."
 
 exit $fail

@@ -1,5 +1,6 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { git, gitRoot, projectDocsDir } from "../util.js";
+import { git, gitRoot, projectDocsDir, projectSageDir, sha256 } from "../util.js";
 const AUTH = /auth|session|jwt|oauth|permission|role/i;
 const BACKEND = /(server|api\/|src\/api|backend|internal\/)/i;
 const FRONTEND = /\.(tsx|jsx|css|scss|vue|svelte|html)$/i;
@@ -8,6 +9,18 @@ const API = /(openapi|swagger|\/routes\/|graphql|proto)/i;
 const TESTS = /(\.test\.|\.spec\.|\/tests\/|\/__tests__\/)/i;
 const INFRA = /(Dockerfile|terraform|\.yml|\.yaml|k8s|infra\/|deploy)/i;
 const AI = /(prompt|eval|skill|agents\/)/i;
+/** A rung ≥ 4 claim must look like a command-and-output pair. */
+export function looksLikeCommandOutput(evidence) {
+    if (!evidence.trim())
+        return false;
+    if (/```/.test(evidence))
+        return true;
+    if (/^[\$%#>]\s/m.test(evidence))
+        return true;
+    if (/\n\$\s/.test(evidence))
+        return true;
+    return false;
+}
 export function fingerprint(f) {
     if (f.fingerprint)
         return f.fingerprint;
@@ -80,6 +93,11 @@ export function validateFindingRow(row) {
     if (r.cannot_verify !== undefined && typeof r.cannot_verify !== "boolean") {
         return { ok: false, reason: `cannot_verify must be a boolean when present — got ${JSON.stringify(r.cannot_verify)}` };
     }
+    if (r.rung !== undefined) {
+        if (typeof r.rung !== "number" || !Number.isInteger(r.rung) || r.rung < 1 || r.rung > 5) {
+            return { ok: false, reason: `rung must be an integer 1-5 when present — got ${JSON.stringify(r.rung)}` };
+        }
+    }
     return { ok: true, finding: row };
 }
 export function gate(findings) {
@@ -99,6 +117,10 @@ export function gate(findings) {
         // `evidence` would defeat that; every other finding keeps the existing
         // low-evidence-caps-confidence rule.
         if (!copy.cannot_verify && (!copy.evidence || !copy.evidence.trim())) {
+            copy.confidence = Math.min(copy.confidence, 5);
+        }
+        if (copy.rung != null && copy.rung >= 4 && !looksLikeCommandOutput(copy.evidence || "")) {
+            copy.rung = 3;
             copy.confidence = Math.min(copy.confidence, 5);
         }
         copy.confidence = Math.max(1, Math.min(10, Math.round(copy.confidence)));
@@ -157,6 +179,38 @@ export function dedup(findings) {
     // got dropped" — precisely the clean-bill-of-health failure mode gate()'s
     // `.rejected` exists to prevent (see the block comment above gate()).
     return Object.assign(out, { rejected: gated.rejected });
+}
+export function reviewStatePath(sprint, root) {
+    return join(projectSageDir(root), "sprints", sprint, "review-state.json");
+}
+export function loadReviewState(sprint, root) {
+    const p = reviewStatePath(sprint, root);
+    if (!existsSync(p))
+        return {};
+    try {
+        return JSON.parse(readFileSync(p, "utf8"));
+    }
+    catch {
+        return {};
+    }
+}
+export function saveReviewState(sprint, state, root) {
+    const p = reviewStatePath(sprint, root);
+    mkdirSync(join(p, ".."), { recursive: true });
+    writeFileSync(p, JSON.stringify(state, null, 2) + "\n");
+}
+/** Suppress prior-run `skipped` fingerprints only when the file hash is unchanged. Never suppress `fixed`. */
+export function applyCrossRunDedup(findings, state, fileHash) {
+    return findings.filter((f) => {
+        const fp = fingerprint(f);
+        const prior = state[fp];
+        if (!prior || prior.disposition !== "skipped")
+            return true;
+        const now = fileHash(f.path);
+        if (!now)
+            return true;
+        return now !== prior.hash;
+    });
 }
 export function classifyBand(confidence) {
     if (confidence >= 7)
@@ -359,9 +413,6 @@ export function select(opts) {
     });
     return filtered;
 }
-export function shouldRedTeam(scope, findings) {
-    return scope.DIFF_LINES > 200 || findings.some((f) => f.severity === "CRITICAL");
-}
 // --- Recommendation check -------------------------------------------------
 //
 // gstack's model: every review artifact ends with one canonical bottom-line
@@ -447,4 +498,18 @@ export function classifyFix(f) {
     if (f.severity === "MEDIUM" || f.severity === "NITPICK")
         return "AUTO-FIX";
     return "ASK";
+}
+export function contentHash(path) {
+    if (!existsSync(path))
+        return undefined;
+    try {
+        return sha256(readFileSync(path, "utf8"));
+    }
+    catch {
+        return undefined;
+    }
+}
+export function sessionReviewDir(slug, root) {
+    const day = new Date().toISOString().slice(0, 10);
+    return join(projectSageDir(root), "reviews", `${day}-${slug}`);
 }

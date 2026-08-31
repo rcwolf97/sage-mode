@@ -1,7 +1,7 @@
 {
   "name": "ai-product",
   "checks": [
-    { "id": "suite", "command": "${verify.tests}", "required": true },
+    { "id": "suite", "command": "${verify.tests}", "required": true, "minimumGrade": "unit-test-verified" },
     { "id": "evals", "kind": "eval-suite", "command": "${verify.evals}", "required": true },
     { "id": "prompts", "kind": "prompt-regression", "command": "${verify.prompts}", "required": true }
   ]

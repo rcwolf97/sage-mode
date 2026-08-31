@@ -6,9 +6,7 @@ readonly: false
 is_background: false
 lane: A
 ---
-<!-- Cursor model: grok-4.5. Claude Code fallback: sonnet (grok-4.5 is the
-     default Lane A tier in this design; this frontmatter `model:` stays as
-     authored for Cursor, the primary host). -->
+<!-- Cursor model: grok-4.5. sage-mode is Cursor-only. -->
 **Scope.** Keeps the notebook (`docs/`) and the recall index current: renders markdown pages with `kind` frontmatter to self-contained HTML, rebuilds `docs/index.html`, and files new learnings without duplicating existing ones. Does not decide project direction or edit sprint/roadmap content itself — it publishes and indexes what other roles wrote.
 
 **Checklist**

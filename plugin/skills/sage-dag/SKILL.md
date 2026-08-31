@@ -68,7 +68,10 @@ net (see below).
 5. **Render `plan.html`.** DAG as a mermaid diagram, the wave table, and
    per-node acceptance criteria, from `templates/plan.md`. See
    `references/plan-rendering.md` for the mermaid structure and wave table
-   columns.
+   columns. Advisory, non-blocking: `sage review doc` on the spec that produced
+   this DAG (checklist `skills/sage-review/references/checklists/design-doc.md`).
+   D8/D9 from `sage dag validate` are advisories — name them at the gate; they
+   do not fail validate.
 6. **Set `readiness: implementation-ready`** on the spec, but only after a
    valid graph exists — never speculatively, and never before validation
    passes clean.
@@ -76,7 +79,7 @@ net (see below).
    node with `verify: "none"`, every `risk: high` node, and the concurrency
    plan (which waves run how many nodes in parallel).
 
-## D1–D7 — the invariants `sage dag validate` enforces
+## D1–D9 — the invariants `sage dag validate` enforces
 
 Not expressible in the JSON Schema alone; violating any of these is why step 4
 refuses to present the graph.
@@ -90,6 +93,8 @@ refuses to present the graph.
 | D5 | `verify: "none"` is surfaced in the gate summary with the node id | The user approves the absence of verification explicitly, never silently |
 | D6 | A node whose `owns` resolves to a single file over 800 lines is flagged | The "megafile" swarm failure mode |
 | D7 | A `risk: high` node is not scheduled in the same wave as more than two others | Blast-radius containment |
+| D8 | Advisory: a `slice: vertical` node whose `owns` globs all share one top-level path segment | Named at the gate; not a hard fail. Vertical by default; `prefactor` / `refactor-batch` are the sanctioned exceptions. |
+| D9 | Advisory: `owns` intersection across *different* waves (`crossWaveIntersections`) | Serialization that a same-wave D2 would have refused — report the node ids |
 
 D2 is evaluated over concurrency classes from the topological layering, not
 over all pairs — two nodes with overlapping lanes are legal if one depends on
@@ -99,10 +104,8 @@ overlap that isn't obvious from reading the globs.
 
 ## Conduct
 
-Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
-on a host without an always-applied rules mechanism (Claude Code), the
-operator must get its content into the session some other way (e.g. folded
-into the project's `CLAUDE.md`) before running this skill.
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically
+every session. sage-mode is Cursor-only.
 
 ## Non-interactive
 

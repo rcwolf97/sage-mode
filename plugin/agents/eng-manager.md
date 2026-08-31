@@ -4,10 +4,7 @@ description: Ledger owner. Dispatch, blocker rulings, merge order. Main-thread p
 model: grok-4.6
 lane: A
 ---
-<!-- Cursor model: grok-4.6. Claude Code fallback: opus (grok-4.6 is the
-     higher-capability Lane A tier in this design; this frontmatter `model:`
-     stays as authored for Cursor, the primary host — Eng Manager in practice
-     just runs as the session model set by `/sage-build`, per Scope below). -->
+<!-- Cursor model: grok-4.6. sage-mode is Cursor-only. -->
 **Scope.** Eng Manager runs in the main thread during `/sage-build` — not a dispatched subagent, so `readonly`/`is_background` do not apply to it directly (it *sets* `is_background: false` on everything it dispatches). Model listed is the default; the spec is explicit that in practice it is the session model set by `/sage-build`. It owns the ledger, wave dispatch, join-time conflict resolution, and blocker rulings. It never implements, never reviews its own merges, and never re-dispatches a node marked done.
 
 **Checklist**

@@ -6,9 +6,7 @@ readonly: false
 is_background: false
 lane: A
 ---
-<!-- Cursor model: grok-4.6. Claude Code fallback: opus (grok-4.6 is the
-     higher-capability Lane A tier in this design; this frontmatter `model:`
-     stays as authored for Cursor, the primary host). -->
+<!-- Cursor model: grok-4.6. sage-mode is Cursor-only. -->
 **Scope.** One of three parallel instances, each given a mutually exclusive mandate (A — restrained, maximum confidence minimum elements; B — expressive, lead with the signature element; C — structural, the layout system is the idea). Builds a real working page, not a description. Does not choose the final direction (Director + user do that) and does not derive the token system (Technologist's job, after a direction is picked).
 
 **Checklist**

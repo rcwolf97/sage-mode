@@ -10,6 +10,7 @@ import {
   type Dag,
   type DagNode,
   type NodeInterfaces,
+  advisories,
 } from "../lib/dag/index.js";
 import { pluginRoot } from "../lib/util.js";
 
@@ -26,6 +27,7 @@ const base: Dag = {
       acceptance: ["POST /ingest returns 401 without a bearer token"],
       verify: "npm test",
       risk: "low",
+      slice: "vertical",
     },
     {
       id: "n2",
@@ -36,6 +38,7 @@ const base: Dag = {
       acceptance: ["The form renders a 401 error string from the API"],
       verify: "npm test",
       risk: "low",
+      slice: "vertical",
     },
   ],
 };
@@ -471,6 +474,7 @@ test("dag validate: D7 high-risk-wave message uses the same 0-indexed wave numbe
     acceptance: ["exits 0 on a clean run"],
     verify: "npm test",
     risk: "high",
+      slice: "vertical",
   });
   // Wave 0: n1 (low risk, satisfies "nodes minItems 1" trivially as a root).
   // Wave 1 (the SECOND wave, index 1): three high-risk nodes depending on n1.
@@ -614,4 +618,42 @@ test("dag validate: terminates cleanly on a cyclic DAG while still running the i
   const v = validate(dag);
   assert.ok(Date.now() - start < 2000, "validate() must return quickly on a cyclic DAG, not hang");
   assert.ok(v.some((x) => x.code === "D1" && x.message.includes("cycle")), "the cycle itself must still be reported");
+});
+
+test("dag validate: missing slice is a schema violation", () => {
+  const node = { ...base.nodes[0]! };
+  delete (node as { slice?: string }).slice;
+  const v = validate({ ...base, nodes: [node] });
+  assert.ok(v.some((x) => x.code === "schema" && /slice required/.test(x.message)));
+});
+
+test("D8 advisory: vertical node whose owns globs share one top-level segment", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      {
+        ...base.nodes[0]!,
+        id: "n1",
+        depends_on: [],
+        slice: "vertical",
+        owns: ["src/api/**", "src/web/**"],
+      },
+    ],
+  };
+  const a = advisories(dag);
+  assert.ok(a.some((x) => x.code === "D8" && x.nodes?.includes("n1")));
+});
+
+test("D9 advisory: two vertical nodes serialized by an owns collision report the node ids", () => {
+  const dag: Dag = {
+    ...base,
+    nodes: [
+      { ...base.nodes[0]!, id: "n1", depends_on: [], owns: ["src/api/**"], slice: "vertical" },
+      { ...base.nodes[1]!, id: "n2", depends_on: ["n1"], owns: ["src/api/**"], slice: "vertical" },
+    ],
+  };
+  const a = advisories(dag);
+  const d9 = a.find((x) => x.code === "D9");
+  assert.ok(d9, "D9 should name the serialization");
+  assert.ok(d9!.nodes?.includes("n1") && d9!.nodes?.includes("n2"));
 });

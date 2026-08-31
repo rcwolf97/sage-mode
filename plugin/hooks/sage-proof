@@ -29,7 +29,9 @@ fi
 # response — see json-safe.sh's emit_* block comment. No interpreter
 # fallback here: python3 has always been a hard prerequisite for this hook
 # (no node/jq path ever existed for it), unchanged by this refactor.
-PROOF_RESULT=$(python3 - "$LEDGER" "$LOOP" "$SAGE_BIN" "$ROOT" <<'PY'
+PROOF_SRC=$(mktemp "${TMPDIR:-/tmp}/sage-proof-src.XXXXXX")
+trap 'rm -f "$PROOF_SRC"' EXIT
+cat > "$PROOF_SRC" <<'PY'
 import json, os, subprocess, sys
 ledger, loop, sage, root = sys.argv[1], int(float(sys.argv[2] or 0)), sys.argv[3], sys.argv[4]
 text = open(ledger).read()
@@ -76,7 +78,7 @@ try:
 except Exception:
     print(json.dumps({"sage_decision": "allow"}))
 PY
-)
+PROOF_RESULT=$(python3 "$PROOF_SRC" "$LEDGER" "$LOOP" "$SAGE_BIN" "$ROOT")
 PROOF_DECISION=$(json_get_from "${PROOF_RESULT:-}" sage_decision)
 PROOF_MESSAGE=$(json_get_from "${PROOF_RESULT:-}" sage_message)
 case "$PROOF_DECISION" in

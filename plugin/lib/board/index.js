@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { git, gitRoot, projectSageDir } from "../util.js";
+import { git, gitRoot, projectSageDir, pluginRoot, parseFrontmatter } from "../util.js";
 import { loadDag, expandAgainstTree } from "../dag/index.js";
 import { parseJsonl } from "../review/index.js";
 const STATUS = [
@@ -57,6 +57,16 @@ export function parseLedger(text) {
     const laneC = Number(text.match(/lane C review tokens:\s*([\d,]+)/)?.[1]?.replace(/,/g, "") || 0);
     const wtf = Number(text.match(/WTF-LIKELIHOOD:\s*(\d+)/)?.[1] || 0);
     const redWarning = text.match(/WARNING — allowing after 3 blocked re-entries[\s\S]*?(?=\n## |\n$)/)?.[0];
+    const skippedSteps = [];
+    const skippedBlock = text.split("## Skipped steps")[1]?.split("## ")[0] || "";
+    for (const line of skippedBlock.split("\n")) {
+        if (!line.startsWith("| ") || line.startsWith("| step"))
+            continue;
+        const cols = line.split("|").map((s) => s.trim());
+        if (!cols[1] || cols[1] === "----" || cols[1] === "step" || cols[1] === "—")
+            continue;
+        skippedSteps.push({ step: cols[1], status: "skipped", reason: cols[2] && cols[2] !== "—" ? cols[2] : undefined });
+    }
     return {
         sprint,
         plan,
@@ -69,6 +79,7 @@ export function parseLedger(text) {
         cost: { laneB, laneCtokens: laneC },
         wtf,
         redWarning,
+        skippedSteps,
     };
 }
 export function renderLedger(l) {
@@ -104,7 +115,12 @@ ${l.rulings.map((r) => `- ${r}`).join("\n") || "- none"}
 
 ## Circuit
 - WTF-LIKELIHOOD: ${l.wtf}
-${l.redWarning ? `\n${l.redWarning}\n` : ""}`;
+${l.redWarning ? `\n${l.redWarning}\n` : ""}
+## Skipped steps
+| step | reason |
+|------|--------|
+${(l.skippedSteps || []).length ? (l.skippedSteps || []).map((s) => `| ${s.step} | ${s.reason || "—"} |`).join("\n") : "(none)"}
+`;
 }
 export function loadLedger(sprint, root) {
     const p = ledgerPath(sprint, root);
@@ -374,4 +390,66 @@ export function evaluateCircuitBreaker(l, root) {
  * mistake for a clean zero score) and scores it in one step. */
 export function evaluateCircuitBreakerForSprint(sprint, root) {
     return evaluateCircuitBreaker(loadLedgerOrThrow(sprint, root), root);
+}
+export function skippedStepsWithoutReason(l) {
+    return (l.skippedSteps || [])
+        .filter((s) => s.status === "skipped" && !(s.reason && s.reason.trim() && s.reason !== "—"))
+        .map((s) => s.step);
+}
+const ROLE_AGENT = {
+    frontend: "implementer-frontend",
+    backend: "implementer-backend",
+    data: "implementer-data",
+    infra: "implementer-infra",
+    ai: "implementer-ai",
+    design: "design-technologist",
+};
+function agentDisplayName(role) {
+    const file = ROLE_AGENT[role];
+    if (!file)
+        return role;
+    const p = join(pluginRoot, "agents", `${file}.md`);
+    if (!existsSync(p))
+        return file;
+    const { data } = parseFrontmatter(readFileSync(p, "utf8"));
+    return String(data.name || file);
+}
+/** Markdown source for `sage board render`. Caller writes it then HTML-renders. */
+export function renderBoardMarkdown(sprint, root) {
+    const l = loadLedgerOrThrow(sprint, root);
+    const dagPath = join(projectSageDir(root), "sprints", sprint, "dag.json");
+    const dag = existsSync(dagPath) ? loadDag(dagPath) : null;
+    const wtf = evaluateCircuitBreaker(l, root);
+    const b = wtf.breakdown;
+    const sum = b.revertPoints + b.fileSpreadPoints + b.fixCountPoints + b.lowFindingsPoints + b.outOfLanePoints;
+    const lines = [
+        "---",
+        `title: Sprint ${sprint} board`,
+        "kind: brief",
+        "---",
+        "",
+        `# Sprint ${sprint} commander console`,
+        "",
+        "Observed model receipts are unavailable — SPIKE-02 Cursor plugin-shipped `model:` did not produce a host usage/cost line. Declared values below are frontmatter only.",
+        "",
+        `WTF total **${wtf.score}** = reverts ${b.revertPoints} + file-spread ${b.fileSpreadPoints} + fix-count ${b.fixCountPoints} + low-findings ${b.lowFindingsPoints} + out-of-lane ${b.outOfLanePoints} (sum ${sum}).`,
+        "",
+    ];
+    l.waves.forEach((wave, i) => {
+        lines.push(`## Wave ${i}`);
+        lines.push("");
+        lines.push("| node | agent | lane | status | attempts | owns | declared model | observed model |");
+        lines.push("|------|-------|------|--------|----------|------|----------------|----------------|");
+        for (const id of wave) {
+            const node = l.nodes[id];
+            const dagNode = dag?.nodes.find((n) => n.id === id);
+            const agent = dagNode ? agentDisplayName(dagNode.role) : "—";
+            const lane = dagNode ? (dagNode.role === "design" ? "A" : "A") : "—";
+            const owns = dagNode ? dagNode.owns.join(", ") : "—";
+            const declared = node?.model || dagNode?.model || "—";
+            lines.push(`| ${id} | ${agent} | ${lane} | ${node?.status || "—"} | ${node?.attempts ?? 0} | ${owns} | declared: ${declared} | observed: — |`);
+        }
+        lines.push("");
+    });
+    return lines.join("\n");
 }
