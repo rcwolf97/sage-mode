@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-21 · Scores are judgements, not measurements. The method and every caveat are below.
 
-> **In plain terms:** Twelve dimensions, six systems, one to ten. Five of these systems are real software people use every day. The sixth is a document I wrote this week. That asymmetry is the most important thing on this page, so maturity is scored separately and never folded into the total — and the honest reading of the result is at the bottom, under "where sage-mode loses."
+> **In plain terms:** Twelve dimensions, six systems, one to ten. Five of these systems are real software people use every day. The sixth is now also software — but with one integration sprint of telemetry, not a year of it. Maturity is scored separately and never folded into the total.
 
 ---
 
@@ -10,8 +10,8 @@
 
 Three rules I held myself to:
 
-1. **sage-mode is scored as designed, not as built.** Every other score reflects code you can run today. sage-mode's reflects intent. A design document always outscores shipped software, because a design document has never met a user.
-2. **Maturity is a separate row.** It is not averaged in, because averaging it in would let a 9 on "cost control" cancel a 1 on "does it exist." sage-mode scores **1**. superpowers scores **9**.
+1. **sage-mode is scored as designed, with maturity scored as built.** Capability rows still reflect the architecture. The maturity row no longer pretends the code does not exist.
+2. **Maturity is a separate row.** It is not averaged in, because averaging it in would let a 9 on "cost control" cancel a 1 on "does it exist." sage-mode scores **4** — runtime TypeScript, hooks, and `npm run verify` exist; production-sprint telemetry does not. superpowers scores **9**.
 3. **The weights are mine and they're arguable.** Context economy and cost control are weighted 1.1 because they decide whether a system is usable daily. Time-to-first-value is weighted 0.8 because a tool you use for a year can afford a slow start. Reweight and the ranking moves — that's the point of showing them.
 
 Scores draw on the [five teardowns](./overview.html), the [gstack implementation deep-dive](./gstack-coding-mechanics.html), and measurement where measurement was possible (line counts, file counts, `find` output).
@@ -55,7 +55,7 @@ Scores draw on the [five teardowns](./overview.html), the [gstack implementation
 <tr><td class="dim"><b>Time to first value</b><span class="note">Install to useful output.</span><span class="wt">weight 0.8</span></td><td class="sc"><span class="bw"><span class="b" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b" style="width:30%"></span></span><span class="sv">3</span></td><td class="sc"><span class="bw"><span class="b" style="width:20%"></span></span><span class="sv">2</span></td><td class="sc"><span class="bw"><span class="b" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b design" style="width:40%"></span></span><span class="sv">4</span></td></tr>
 </tbody><tfoot>
 <tr class="tot"><td class="dim"><b>Weighted capability</b><span class="note">% of the maximum score across the twelve dimensions</span></td><td class="sc"><span class="bw"><span class="b" style="width:53%"></span></span><span class="sv">53%</span></td><td class="sc"><span class="bw"><span class="b" style="width:56%"></span></span><span class="sv">56%</span></td><td class="sc"><span class="bw"><span class="b" style="width:70%"></span></span><span class="sv">70%</span></td><td class="sc"><span class="bw"><span class="b" style="width:59%"></span></span><span class="sv">59%</span></td><td class="sc"><span class="bw"><span class="b" style="width:60%"></span></span><span class="sv">60%</span></td><td class="sc"><span class="bw"><span class="b design" style="width:86%"></span></span><span class="sv">86%</span></td></tr>
-<tr class="mat"><td class="dim"><b>Maturity — proven in use</b><span class="note">Scored separately and never averaged in. sage-mode is a document.</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:10%"></span></span><span class="sv">1</span></td></tr>
+<tr class="mat"><td class="dim"><b>Maturity — proven in use</b><span class="note">Scored separately and never averaged in. sage-mode is shipped code with thin production telemetry.</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:70%"></span></span><span class="sv">7</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:80%"></span></span><span class="sv">8</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:90%"></span></span><span class="sv">9</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:60%"></span></span><span class="sv">6</span></td><td class="sc"><span class="bw"><span class="b mat" style="width:40%"></span></span><span class="sv">4</span></td></tr>
 </tfoot></table></div>
 
 <p class="cap">Bars encode the score out of ten; length, not colour, carries the value. The darker bar marks sage-mode for reference, and the grey bar in the last row marks maturity — both are emphasis, not a separate quantity. The numbers are the table view.</p>
@@ -94,7 +94,7 @@ Scores draw on the [five teardowns](./overview.html), the [gstack implementation
 
 > **In plain terms:** The parts of this page that should worry you.
 
-**Maturity: 1.** Zero lines of code. superpowers has a documented 94% PR rejection rate and runs evals on its own skill text. gstack has telemetry from real daily use. Every sage-mode score is a claim about software that does not exist, and the history of this kind of document is that the assembly is harder than the parts.
+**Maturity: 4.** Runtime TypeScript in `plugin/lib`, hooks, and a green `npm run verify` exist. superpowers has a documented 94% PR rejection rate and runs evals on its own skill text. gstack has telemetry from real daily use. sage-mode has one integration sprint (this ship-spec landing) and no multi-week production telemetry. Assembly was the hard part; it is no longer zero lines.
 
 **Time to first value: 4** — third from last, ahead only of gstack and Compound Engineering. Eight commands, an org chart, three cost lanes, a notebook renderer, an evidence ledger, and four hooks is a lot of surface before the first useful output. superpowers gets to value in one hook and fourteen files. If sage-mode is not usable at the end of phase 1, the design is wrong.
 

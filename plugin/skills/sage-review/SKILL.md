@@ -7,7 +7,7 @@ disable-model-invocation: true
 # sage-review
 
 Models a second, adversarial engineer who was not in the room when the code was
-written: Reviewer and Red Team subagents, Lane C (`gemini-3.7-flash`),
+written: Reviewer and Red Team subagents, Lane C (`gpt-5.6-sol-medium`),
 `readonly: true`. Cheap and disposable is correct here — review is judgment,
 not production code, and a wrong verdict costs a re-run, not a bad deploy.
 
@@ -18,9 +18,11 @@ notebook root — `docs/` by default; see `rules/sage-conduct.mdc`).
 **Runs:** Reviewer + Red Team, Lane C, non-Anthropic model.
 
 **Conduct.** Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it
-automatically; on a host without an always-applied rules mechanism (Claude
-Code), the operator must get its content into the session some other way
-(e.g. folded into the project's `CLAUDE.md`) before running this skill.
+automatically every session. sage-mode is Cursor-only.
+
+Document review (`sage review doc`) is a separate entry: dispatch Lane C,
+`readonly: true`, against `references/checklists/design-doc.md` — not the
+frontend specialist checklist `design.md`. Non-blocking.
 
 ## Procedure
 

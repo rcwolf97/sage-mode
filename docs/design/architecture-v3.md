@@ -410,20 +410,24 @@ And the honest one — **review burden**: you don't review nodes. The Reviewer d
 ```
 sage-mode/
 ├── .cursor-plugin/plugin.json
-├── commands/                       # the eight verbs
+├── commands/                       # 21 verbs: 15 sage-* (incl. Spine B crit/fix/look/oh) + 6 design-*
 │   ├── sage-shape.md   sage-plan.md   sage-dag.md    sage-build.md
-│   └── sage-review.md  sage-verify.md sage-ship.md   sage-retro.md
+│   ├── sage-review.md  sage-verify.md sage-ship.md   sage-retro.md
+│   ├── sage-crit.md    sage-fix.md    sage-look.md   sage-oh.md
+│   └── design-intake.md … design-critique.md
 ├── skills/
 │   ├── sage-shape/     SKILL.md (~830 lines of substance) + references/
 │   ├── sage-plan/      sage-dag/     sage-build/     sage-review/
-│   ├── sage-verify/    sage-ship/    sage-retro/
+│   ├── sage-verify/    sage-ship/    sage-retro/    sage-crit/ sage-fix/ sage-look/ sage-oh/
 │   ├── sage-notebook/  sage-recall/
 │   └── catalog/                     # ~25, retrieved by sage-recall, never auto-loaded
 ├── rules/
 │   └── sage-conduct.mdc             # alwaysApply — the ~425 portable preamble lines, loaded ONCE
 ├── agents/                          # the org chart, one small file per role
 │   ├── architect.md  implementer-{frontend,backend,data,infra,ai}.md
-│   └── reviewer.md   red-team.md   qa.md   librarian.md
+│   ├── reviewer.md   red-team.md   qa-driver.md   librarian.md
+│   └── design-{director,strategist,technologist,art-director,motion,critic}.md
+│       # 19 role cards. Cursor-only.
 ├── hooks/{hooks.json,sage-careful,sage-lane,sage-solo,sage-proof,sage-bootstrap,json-safe.sh}
 ├── lib/
 │   ├── evidence/      # wtree fingerprint + FRESH/STALE ledger  (§8.1)
@@ -431,12 +435,17 @@ sage-mode/
 │   ├── review/        # finding schema, fingerprint, dedup, confidence gate, scope-gate
 │   ├── consult/       # claude -p wrapper: schema, allowed-tools, cost capture (§5)
 │   ├── notebook/      # md → html renderer + index
-│   └── board/         # ledger + mailbox
+│   ├── board/         # ledger + mailbox
+│   ├── ground/        # citation check
+│   ├── recall/        # BM25 + out-of-scope
+│   └── {setup,lint,egress,redact,manifest}/
 ├── profiles/{web,api,cli,ai-product}.json
 ├── templates/         # roadmap, spec, plan, review, learning, decision brief
 ├── docs/              # sage-mode's own notebook (dogfood)
 └── evals/
 ```
+
+**Design org placement.** The six `design-*` commands (intake, direction, system, build, motion, critique) stay a **phase inside Spine A**, not a separate plugin. They share `sage-conduct`, the notebook renderer, Lane C `design-critic`, and `/sage-setup`'s agent install. Splitting them would duplicate those surfaces and orphan the critic from the review roster. Revisit only if a second product wants the design org without the engineering spine.
 
 ---
 

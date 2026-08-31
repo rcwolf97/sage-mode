@@ -15,6 +15,7 @@
     "dirty": { "type": "boolean" },
     "wtree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "log_path": { "type": "string" },
-    "node": { "type": "string" }
+    "node": { "type": "string" },
+    "grade": { "enum": ["type-check-only", "unit-test-verified", "live-verified", "verifier-blocked"] }
   }
 }

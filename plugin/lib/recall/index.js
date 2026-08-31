@@ -4,7 +4,7 @@ import { parseFrontmatter, projectDocsDir, projectSageDir, readSageHome } from "
 const K1 = 1.5;
 const B = 0.75;
 const STOP = new Set("a an the and or of to in on for with from by at as is are was were be been being this that these those it its into over under not no yes if then else when where how what which who whom whose your you we they them our".split(" "));
-function tokenize(text) {
+export function tokenize(text) {
     return text
         .toLowerCase()
         .split(/[^a-z0-9]+/)
@@ -60,9 +60,13 @@ function indexFile(path, root, kindFallback) {
 export function buildIndex(opts) {
     const docsRoot = opts?.docsRoot || projectDocsDir(opts?.cwd);
     const skillsRoot = opts?.skillsRoot || join(readSageHome() || "", "skills");
+    const scopeRoot = opts?.scopeRoot || join(projectSageDir(opts?.cwd), "out-of-scope");
     const docs = walk(docsRoot, (n) => n.endsWith(".md")).map((p) => indexFile(p, docsRoot, "note"));
     const skills = walk(skillsRoot, (n) => n === "SKILL.md").map((p) => indexFile(p, skillsRoot, "skill"));
-    const all = [...docs, ...skills];
+    const scope = existsSync(scopeRoot)
+        ? walk(scopeRoot, (n) => n.endsWith(".md")).map((p) => indexFile(p, scopeRoot, "out-of-scope"))
+        : [];
+    const all = [...docs, ...skills, ...scope];
     const df = {};
     for (const d of all) {
         for (const t of Object.keys(d.terms))
@@ -73,7 +77,7 @@ export function buildIndex(opts) {
     return {
         version: 1,
         builtAt: new Date().toISOString(),
-        docs,
+        docs: [...docs, ...scope],
         skills,
         stats: { N, avgdl, df },
     };
@@ -94,7 +98,7 @@ function idf(term, N, df) {
     const n = df[term] || 0;
     return Math.log(1 + (N - n + 0.5) / (n + 0.5));
 }
-function bm25(query, doc, stats) {
+export function bm25(query, doc, stats) {
     let score = 0;
     const avgdl = stats.avgdl || 1;
     for (const t of query) {
@@ -139,7 +143,7 @@ export function dedupAppliesWhen(idx, text, threshold = 0.55) {
     }
     return hits.sort((a, b) => b.score - a.score).map((h) => h.d);
 }
-function overlap(a, b) {
+export function overlap(a, b) {
     if (!a.length || !b.length)
         return 0;
     const sb = new Set(b);

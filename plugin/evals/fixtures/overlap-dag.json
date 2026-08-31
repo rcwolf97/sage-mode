@@ -7,55 +7,85 @@
       "id": "n1",
       "title": "API handler work",
       "role": "backend",
-      "owns": ["src/**"],
-      "acceptance": ["POST /x returns 401 without a bearer token"],
+      "owns": [
+        "src/**"
+      ],
+      "acceptance": [
+        "POST /x returns 401 without a bearer token"
+      ],
       "verify": "npm test",
-      "risk": "low"
+      "risk": "low",
+      "slice": "vertical"
     },
     {
       "id": "n2",
       "title": "API sibling work",
       "role": "backend",
-      "owns": ["src/api/**"],
-      "acceptance": ["GET /x returns 200 with a bearer token present"],
+      "owns": [
+        "src/api/**"
+      ],
+      "acceptance": [
+        "GET /x returns 200 with a bearer token present"
+      ],
       "verify": "npm test",
-      "risk": "low"
+      "risk": "low",
+      "slice": "vertical"
     },
     {
       "id": "n3",
       "title": "Typed source glob work",
       "role": "backend",
-      "owns": ["src/**/*.ts"],
-      "acceptance": ["GET /y returns 200 with a typed response body"],
+      "owns": [
+        "src/**/*.ts"
+      ],
+      "acceptance": [
+        "GET /y returns 200 with a typed response body"
+      ],
       "verify": "npm test",
-      "risk": "low"
+      "risk": "low",
+      "slice": "vertical"
     },
     {
       "id": "n4",
       "title": "Single API source file",
       "role": "backend",
-      "owns": ["src/api/foo.ts"],
-      "acceptance": ["POST /y returns 201 when the payload validates"],
+      "owns": [
+        "src/api/foo.ts"
+      ],
+      "acceptance": [
+        "POST /y returns 201 when the payload validates"
+      ],
       "verify": "npm test",
-      "risk": "low"
+      "risk": "low",
+      "slice": "vertical"
     },
     {
       "id": "n5",
       "title": "Fixture bundle glob work",
       "role": "backend",
-      "owns": ["plugin/evals/fixtures/*.json"],
-      "acceptance": ["GET /z returns 200 with the fixture bundle contents"],
+      "owns": [
+        "plugin/evals/fixtures/*.json"
+      ],
+      "acceptance": [
+        "GET /z returns 200 with the fixture bundle contents"
+      ],
       "verify": "npm test",
-      "risk": "low"
+      "risk": "low",
+      "slice": "vertical"
     },
     {
       "id": "n6",
       "title": "Overlap fixture literal file",
       "role": "backend",
-      "owns": ["plugin/evals/fixtures/overlap-dag.json"],
-      "acceptance": ["POST /z returns 201 when the fixture bundle validates"],
+      "owns": [
+        "plugin/evals/fixtures/overlap-dag.json"
+      ],
+      "acceptance": [
+        "POST /z returns 201 when the fixture bundle validates"
+      ],
       "verify": "npm test",
-      "risk": "low"
+      "risk": "low",
+      "slice": "vertical"
     }
   ]
 }

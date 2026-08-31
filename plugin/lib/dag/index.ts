@@ -24,6 +24,7 @@ export interface DagNode {
   model?: string | null;
   notes?: string;
   interfaces?: NodeInterfaces;
+  slice?: "vertical" | "prefactor" | "refactor-batch";
 }
 
 export interface Dag {
@@ -72,6 +73,7 @@ const NODE_KEYS = new Set([
   "model",
   "notes",
   "interfaces",
+  "slice",
 ]);
 const INTERFACE_KEYS = new Set(["consumes", "produces"]);
 
@@ -139,6 +141,9 @@ export function validate(dag: Dag): Violation[] {
     if (!n.acceptance?.length) v.push({ code: "schema", message: `acceptance required on ${n.id}` });
     if (!n.verify) v.push({ code: "schema", message: `verify required on ${n.id}` });
     if (!["low", "medium", "high"].includes(n.risk)) v.push({ code: "schema", message: `risk on ${n.id}` });
+    if (!n.slice || !["vertical", "prefactor", "refactor-batch"].includes(n.slice)) {
+      v.push({ code: "schema", message: `slice required on ${n.id} (vertical | prefactor | refactor-batch)` });
+    }
     for (const a of n.acceptance || []) {
       if (a.length < 10) v.push({ code: "schema", message: `acceptance too short on ${n.id}` });
       if (BAD_ACCEPT.test(a) && !/\d/.test(a) && !/returns|exits|equals|contains|renders/i.test(a)) {
@@ -249,6 +254,60 @@ export function validate(dag: Dag): Violation[] {
   });
 
   return v;
+}
+
+export interface Advisory {
+  code: "D8" | "D9";
+  message: string;
+  nodes?: string[];
+}
+
+/** D8/D9 are gate-surfaced, not hard Violations. */
+export function advisories(dag: Dag): Advisory[] {
+  const out: Advisory[] = [];
+  const waves = plan(dag).waves;
+  for (const n of dag.nodes || []) {
+    if (n.slice !== "vertical") continue;
+    const segs = (n.owns || []).map((g) => g.replace(/^\.\//, "").split("/")[0] || "");
+    const uniq = [...new Set(segs.filter(Boolean))];
+    if (uniq.length === 1 && segs.length > 1) {
+      out.push({
+        code: "D8",
+        message: `${n.id} is slice:vertical but every owns glob shares top-level segment "${uniq[0]}" — likely mis-sliced`,
+        nodes: [n.id],
+      });
+    }
+  }
+  out.push(...crossWaveIntersections(dag, waves));
+  return out;
+}
+
+export function crossWaveIntersections(dag: Dag, waves: string[][]): Advisory[] {
+  const tree = repoTreePaths();
+  const out: Advisory[] = [];
+  for (let i = 0; i < waves.length; i++) {
+    for (let j = i + 1; j < waves.length; j++) {
+      for (const aId of waves[i]!) {
+        for (const bId of waves[j]!) {
+          const a = dag.nodes.find((n) => n.id === aId);
+          const b = dag.nodes.find((n) => n.id === bId);
+          if (!a || !b) continue;
+          for (const ga of a.owns) {
+            for (const gb of b.owns) {
+              if (globIntersect(ga, gb, tree)) {
+                out.push({
+                  code: "D9",
+                  message: `${a.id} and ${b.id} would intersect on ${ga} ∩ ${gb} had they been concurrent — serialized across waves ${i} and ${j}`,
+                  nodes: [a.id, b.id],
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
 }
 
 function findCycle(dag: Dag): string[] | null {

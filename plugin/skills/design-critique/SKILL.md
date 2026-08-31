@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # design-critique
 
-Design Critic on Lane C (`gemini-3.7-flash`), `readonly: true`, `no_children: true`. Because the Critic cannot dispatch its own children, this skill splits capture from judgement the same way `sage-verify` does: `qa-driver` (Lane A, Browser) captures; the Critic judges. The capturer marking its own work would be one witness reviewing itself — the split is the point.
+Design Critic on Lane C (`gpt-5.6-sol-medium`), `readonly: true`, `no_children: true`. Because the Critic cannot dispatch its own children, this skill splits capture from judgement the same way `sage-verify` does: `qa-driver` (Lane A, Browser) captures; the Critic judges. The capturer marking its own work would be one witness reviewing itself — the split is the point.
 
 **Before starting a critique pass, load `references/anti-slop-rubric.md` and `references/accessibility-pass.md`** — the full tables live there; this file carries only the procedure and the pointer.
 

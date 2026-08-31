@@ -109,6 +109,7 @@ test("sage dag worktree reports an unresolvable dag.base as a structured violati
           acceptance: ["returns 200 on success"],
           verify: "npm test",
           risk: "low",
+      slice: "vertical",
         },
       ],
     }),
@@ -149,6 +150,7 @@ function twoWaveDagFile(dir: string): string {
           acceptance: ["POST /ingest returns 401 without a bearer token"],
           verify: "npm test",
           risk: "low",
+      slice: "vertical",
         },
         {
           id: "n2",
@@ -159,6 +161,7 @@ function twoWaveDagFile(dir: string): string {
           acceptance: ["The form renders a 401 error string from the API"],
           verify: "npm test",
           risk: "low",
+      slice: "vertical",
         },
       ],
     }),
@@ -538,4 +541,20 @@ test("--help advertises every newly-wired verb", () => {
   assert.match(r.stdout, /--allow-unignored/);
   assert.match(r.stdout, /--fenced/);
   assert.match(r.stdout, /--wave N.*0-indexed/);
+  assert.match(r.stdout, /sage ground/);
+  assert.match(r.stdout, /sage review doc/);
+  assert.match(r.stdout, /sage board render/);
+});
+
+test("sage ground and sage review doc are reachable from the CLI", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sage-cli-g-"));
+  gitInit(dir);
+  writeFileSync(join(dir, "doc.md"), "See missing/nope.ts:1\nTODO(x)\n");
+  const g = spawnSync("node", [CLI, "ground", "doc.md", "--json"], { cwd: dir, encoding: "utf8" });
+  assert.equal(g.status, 1, g.stderr + g.stdout);
+  const report = JSON.parse(g.stdout);
+  assert.ok(report.flags.length >= 1);
+  const d = spawnSync("node", [CLI, "review", "doc", "doc.md"], { cwd: dir, encoding: "utf8" });
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stdout, /completeness/);
 });

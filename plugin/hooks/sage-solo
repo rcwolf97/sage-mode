@@ -51,7 +51,9 @@ TYPE=$(json_get subagent_type)
 # the shell as an internal-protocol marker object rather than the final
 # host-shaped response — see json-safe.sh's emit_* block comment.
 if command -v python3 >/dev/null 2>&1; then
-SOLO_RESULT=$(python3 - "$TYPE" "$PARENT" <<'PY'
+SOLO_SRC=$(mktemp "${TMPDIR:-/tmp}/sage-solo-src.XXXXXX")
+trap 'rm -f "$SOLO_SRC"' EXIT
+cat > "$SOLO_SRC" <<'PY'
 import json, sys
 typ, parent = sys.argv[1], sys.argv[2]
 no_children = {"reviewer", "red-team", "design-critic"}
@@ -64,9 +66,11 @@ if parent in no_children:
 else:
     print(json.dumps({"sage_decision": "allow"}))
 PY
-)
+SOLO_RESULT=$(python3 "$SOLO_SRC" "$TYPE" "$PARENT")
 elif command -v node >/dev/null 2>&1; then
-SOLO_RESULT=$(node - "$TYPE" "$PARENT" <<'JS'
+SOLO_SRC=$(mktemp "${TMPDIR:-/tmp}/sage-solo-src.XXXXXX")
+trap 'rm -f "$SOLO_SRC"' EXIT
+cat > "$SOLO_SRC" <<'JS'
 const [typ, parent] = process.argv.slice(2);
 const noChildren = new Set(["reviewer", "red-team", "design-critic"]);
 if (noChildren.has(parent)) {
@@ -79,7 +83,7 @@ if (noChildren.has(parent)) {
   process.stdout.write(JSON.stringify({ sage_decision: "allow" }) + "\n");
 }
 JS
-)
+SOLO_RESULT=$(node "$SOLO_SRC" "$TYPE" "$PARENT")
 else
   emit_deny "[solo] Neither python3 nor node is available to evaluate the subagent-depth guard. Blocked (fail closed)."
 fi

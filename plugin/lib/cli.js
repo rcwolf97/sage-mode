@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { stdin } from "node:process";
-import { VERSION, fail, flag, opt, takeRest, pluginRoot, gitRoot } from "./util.js";
+import { VERSION, fail, flag, opt, takeRest, pluginRoot, gitRoot, projectDocsDir } from "./util.js";
 import { setup, checkHealth, uninstall } from "./setup/index.js";
 import { lint } from "./lint/index.js";
 import { render, renderAll, index as notebookIndex, copyAssets } from "./notebook/index.js";
 import { run as evidenceRun, check as evidenceCheck, trust, wtree } from "./evidence/index.js";
-import { validateFile, loadDag, plan as dagPlan, lanes, worktree } from "./dag/index.js";
-import { parseJsonl, toJsonl, gate, dedup, scope as reviewScope, select as reviewSelect, checkRecommendation, } from "./review/index.js";
+import { validateFile, loadDag, plan as dagPlan, lanes, worktree, advisories } from "./dag/index.js";
+import { parseJsonl, toJsonl, gate, dedup, scope as reviewScope, select as reviewSelect, checkRecommendation, applyCrossRunDedup, loadReviewState, contentHash, } from "./review/index.js";
 import { consult } from "./consult/index.js";
-import { saveLedger, parseLedger, next as boardNext, writeStatus, writeBlocker, writeAnswer, activeSprint, loadLedgerOrThrow, evaluateCircuitBreakerForSprint, LedgerNotFoundError, } from "./board/index.js";
+import { saveLedger, parseLedger, next as boardNext, writeStatus, writeBlocker, writeAnswer, activeSprint, loadLedgerOrThrow, evaluateCircuitBreakerForSprint, LedgerNotFoundError, renderBoardMarkdown, skippedStepsWithoutReason, } from "./board/index.js";
 import { buildIndex, saveIndex, loadIndex, search, dedupAppliesWhen } from "./recall/index.js";
 import { list as egressList, verify as egressVerify, grants as egressGrants } from "./egress/index.js";
 import { projectSageDir } from "./util.js";
+import { groundMechanical, formatGroundReport, reviewDocSkeleton } from "./ground/index.js";
 function help() {
     return `sage ${VERSION}
 
@@ -26,18 +28,20 @@ Usage:
   sage unsafe <reason>
   sage notebook render [--watch] [--strict] [file.md]
   sage notebook index
-  sage evidence run --label L [--node N] [--allow-unignored] -- <cmd>
-  sage evidence check --label L [--expect-cmd C] [--max-age H] [--allow-paths P]
+  sage evidence run --label L [--node N] [--sprint S | --session] [--grade G] [--allow-unignored] -- <cmd>
+  sage evidence check --label L [--expect-cmd C] [--max-age H] [--allow-paths P] [--sprint S | --session]
   sage evidence trust --command C
   sage dag validate <dag.json>
   sage dag plan <dag.json> [--fenced]
   sage dag lanes <dag.json> --wave N      # 0-indexed, matches \`dag plan\` waves; default 0
   sage dag worktree <nodeId> --dag <dag.json>
-  sage review gate                        # rejects malformed rows loudly; exits non-zero if any
-  sage review dedup
+  sage review gate [--sprint S]
+  sage review dedup [--sprint S]
   sage review scope --base <ref> [--fenced]
   sage review select --scope <json> [--stats <file>] [--all-specialists] [--fenced]
-  sage review recommendation [--file F]   # reads markdown from stdin if no --file
+  sage review recommendation [--file F]
+  sage review doc <file>                  # non-blocking design-doc review; never auto-rewrites
+  sage ground <file>                      # citation check; never auto-rewrites
   sage consult --role R [--brief F] [--schema S] [--session]
   sage board next [--sprint S] [--fenced]
   sage board status --sprint S --node N --state S
@@ -45,6 +49,7 @@ Usage:
   sage board answer --sprint S --node N
   sage board ledger [--sprint S]
   sage board wtf [--sprint S] [--fenced]
+  sage board render [--sprint S]          # writes <notebook>/sprints/NN/board.html
   sage egress list [--sprint S] [--json]
   sage egress verify [--json] [--fenced]  # exit 3 on a broken chain, 0 when ok
   sage egress grants [--json]
@@ -199,6 +204,18 @@ async function main(argv) {
     }
     if (cmd === "lint") {
         const issues = lint(opt(rest, "root") || pluginRoot);
+        const sprintFlag = opt(rest, "sprint");
+        if (sprintFlag) {
+            try {
+                const l = loadLedgerOrThrow(sprintFlag);
+                for (const step of skippedStepsWithoutReason(l)) {
+                    issues.push({ file: `sprints/${sprintFlag}/ledger.md`, rule: "skipped-reason", message: `skipped step "${step}" has no reason` });
+                }
+            }
+            catch {
+                /* no ledger — plugin lint still runs */
+            }
+        }
         print({ issues }, json, issues.length ? issues.map((i) => `${i.file}: ${i.rule}: ${i.message}`).join("\n") : "ok");
         return issues.length ? 1 : 0;
     }
@@ -249,23 +266,27 @@ async function main(argv) {
             const { rest: cmdv } = takeRest(rest);
             const label = opt(rest, "label");
             if (!label || !cmdv.length)
-                fail("sage evidence run --label L [--node N] [--allow-unignored] -- <cmd>");
+                fail("sage evidence run --label L [--node N] [--sprint S | --session] [--grade G] [--allow-unignored] -- <cmd>");
+            const gradeRaw = opt(rest, "grade");
             return await evidenceRun({
                 label,
                 command: cmdv,
                 node: opt(rest, "node"),
                 allowUnignored: flag(rest, "allow-unignored"),
+                sprintId: flag(rest, "session") ? "session" : opt(rest, "sprint"),
+                grade: gradeRaw,
             });
         }
         if (sub === "check") {
             const label = opt(rest, "label");
             if (!label)
-                fail("sage evidence check --label L");
+                fail("sage evidence check --label L [--sprint S | --session]");
             const r = evidenceCheck({
                 label,
                 expectCmd: opt(rest, "expect-cmd"),
                 maxAgeHours: opt(rest, "max-age") ? Number(opt(rest, "max-age")) : undefined,
                 allowPaths: opt(rest, "allow-paths")?.split(","),
+                sprintId: flag(rest, "session") ? "session" : opt(rest, "sprint"),
             });
             print(r, json, `${r.grade} ${r.reason}`);
             return r.grade === "FRESH" ? 0 : 1;
@@ -292,7 +313,12 @@ async function main(argv) {
             if (!file)
                 fail("sage dag validate <dag.json>");
             const v = validateFile(file);
-            print({ violations: v }, json, v.length ? v.map((x) => `${x.code}: ${x.message}`).join("\n") : "ok");
+            const adv = v.length ? [] : advisories(loadDag(file));
+            const lines = [
+                ...(v.length ? v.map((x) => `${x.code}: ${x.message}`) : ["ok"]),
+                ...adv.map((a) => `advisory ${a.code}: ${a.message}`),
+            ];
+            print({ violations: v, advisories: adv }, json, lines.join("\n"));
             return v.length ? 1 : 0;
         }
         if (sub === "plan") {
@@ -366,7 +392,13 @@ async function main(argv) {
             // independent of how many findings validated cleanly.
             const input = await readStdin();
             const findings = parseJsonl(input);
-            const out = gate(findings);
+            let out = gate(findings);
+            const sprint = opt(rest, "sprint") || activeSprint();
+            if (sprint) {
+                const state = loadReviewState(sprint);
+                const kept = applyCrossRunDedup(out, state, (p) => contentHash(p));
+                out = Object.assign(kept, { rejected: out.rejected });
+            }
             const rejected = out.rejected;
             if (json) {
                 print({ findings: out, rejected }, true);
@@ -394,7 +426,13 @@ async function main(argv) {
             // alone flips the exit code, however many findings validated cleanly.
             const input = await readStdin();
             const findings = parseJsonl(input);
-            const out = dedup(findings);
+            let out = dedup(findings);
+            const sprint = opt(rest, "sprint") || activeSprint();
+            if (sprint) {
+                const state = loadReviewState(sprint);
+                const kept = applyCrossRunDedup(out, state, (p) => contentHash(p));
+                out = Object.assign(kept, { rejected: out.rejected });
+            }
             const rejected = out.rejected ?? [];
             if (json) {
                 print({ findings: out, rejected }, true);
@@ -461,7 +499,17 @@ async function main(argv) {
             print(result, json, result.issues.join("\n"));
             return result.ok ? 0 : 1;
         }
-        fail("sage review gate|dedup|scope|select|recommendation");
+        if (sub === "doc") {
+            const file = rest.find((a, i) => i > 0 && !a.startsWith("-"));
+            if (!file)
+                fail("sage review doc <file>");
+            if (!existsSync(file))
+                fail(`sage review doc: ${file} does not exist`);
+            const body = reviewDocSkeleton(file);
+            print({ file, body }, json, body);
+            return 0;
+        }
+        fail("sage review gate|dedup|scope|select|recommendation|doc");
     }
     if (cmd === "consult") {
         const role = opt(rest, "role");
@@ -555,7 +603,19 @@ async function main(argv) {
                 throw e;
             }
         }
-        fail("sage board next|status|blocker|answer|ledger|wtf");
+        if (sub === "render") {
+            if (!sprint)
+                fail("sage board render [--sprint S]");
+            const md = renderBoardMarkdown(sprint);
+            const destDir = join(projectDocsDir(), "sprints", sprint);
+            mkdirSync(destDir, { recursive: true });
+            const mdPath = join(destDir, "board.md");
+            writeFileSync(mdPath, md);
+            const html = render(mdPath);
+            print({ out: html }, json, html);
+            return 0;
+        }
+        fail("sage board next|status|blocker|answer|ledger|wtf|render");
     }
     if (cmd === "egress") {
         const sub = rest[0];
@@ -612,6 +672,16 @@ async function main(argv) {
         });
         print(hits, json, hits.length ? hits.map((h) => `${h.score.toFixed(3)}\t${h.kind}\t${h.path}\t${h.title}`).join("\n") : "no results");
         return 0;
+    }
+    if (cmd === "ground") {
+        const file = rest.find((a) => !a.startsWith("-"));
+        if (!file)
+            fail("sage ground <file>");
+        if (!existsSync(file))
+            fail(`sage ground: ${file} does not exist`);
+        const report = groundMechanical(file);
+        print(report, json, formatGroundReport(report));
+        return report.flags.length ? 1 : 0;
     }
     process.stderr.write(help());
     return 1;

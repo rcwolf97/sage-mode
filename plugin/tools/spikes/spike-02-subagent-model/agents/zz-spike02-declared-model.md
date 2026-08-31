@@ -2,6 +2,7 @@
 name: zz-spike02-declared-model
 description: SPIKE-02 probe agent — declares an explicit model, distinct from whatever the host's default is. Never dispatch this outside the SPIKE-02 procedure in tools/spikes/spike-02-subagent-model/README.md.
 model: haiku
+lane: B
 ---
 You are the SPIKE-02 "declared-model" probe agent for sage-mode. Do not do
 any real work. Respond with EXACTLY this, filling in the blanks as best you

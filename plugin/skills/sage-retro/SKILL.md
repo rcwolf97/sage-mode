@@ -31,9 +31,13 @@ configured notebook root, `docs/` by default — see `rules/sage-conduct.mdc`.)
    review cycle to converge, or shipped as a residual — not everything that
    merely happened this sprint.
 
-3. **Draft, dedup, write.** For each notable problem, draft a learning in the
-   shape below, from `templates/learning.md`. **Before writing**, run `sage
-   recall dedup --applies-when "<the draft's applies_when text>"`. Above the
+3. **Draft, ground, dedup, write.** For each notable problem, draft a learning in the
+   shape below, from `templates/learning.md`. **`scope` is `sprint` (default) or
+   `session`.** Sprint reads today's ledger/review/verify. Session reads
+   `.sage/findings/session/` and `.sage/evidence/session/` — a `/sage-fix` with
+   no sprint still gets a retro. **Before writing**, run `sage ground` on the
+   drafted learning (never auto-rewrite; fix or annotate flags first), then
+   `sage recall dedup --applies-when "<the draft's applies_when text>"`. Above the
    similarity threshold → **update the existing record** — revise its four
    body sections, append this sprint's id to its history, leave `created`
    untouched — instead of writing a new file. **This is the required
@@ -153,10 +157,8 @@ configured notebook root, `docs/` by default — see `rules/sage-conduct.mdc`.)
 
 ## Conduct
 
-Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
-on a host without an always-applied rules mechanism (Claude Code), the
-operator must get its content into the session some other way (e.g. folded
-into the project's `CLAUDE.md`) before running this skill.
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically
+every session. sage-mode is Cursor-only.
 
 ## Non-interactive
 

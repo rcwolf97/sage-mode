@@ -1,7 +1,7 @@
 {
   "name": "cli",
   "checks": [
-    { "id": "suite", "command": "${verify.tests}", "required": true },
+    { "id": "suite", "command": "${verify.tests}", "required": true, "minimumGrade": "unit-test-verified" },
     { "id": "golden", "kind": "golden-file", "command": "${verify.golden}", "required": true },
     { "id": "sandbox", "kind": "clean-sandbox-invocation", "command": "${verify.sandbox}", "required": true },
     { "id": "ttfs", "kind": "time-to-first-success", "command": "${verify.ttfs}", "required": true }

@@ -148,6 +148,7 @@ test("sage CLI end-to-end smoke pass", async (t) => {
         acceptance: ["Rejects a request with no bearer token"],
         verify: "echo ok",
         risk: "low",
+      slice: "vertical",
       },
       {
         id: "n2",
@@ -159,6 +160,7 @@ test("sage CLI end-to-end smoke pass", async (t) => {
         acceptance: ["Profile view renders for an authed user"],
         verify: "echo ok",
         risk: "low",
+      slice: "vertical",
       },
     ],
   };

@@ -16,6 +16,7 @@
       ],
       "verify": "node lib/cli.js --help",
       "risk": "low",
+      "slice": "vertical",
       "design": "none"
     }
   ]

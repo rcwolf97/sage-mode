@@ -25,8 +25,10 @@ see `rules/sage-conduct.mdc`.)
    `status: approved`. Point the user at `/sage-shape` instead of guessing at
    scope from nothing.
 2. **Ground.** Read the roadmap, and `sage recall "<candidate sprint framing>"
-   --kind learning` for prior sprints that touched the same area. A sprint that
-   repeats a documented mistake is a planning failure, not bad luck.
+   --kind learning` plus `--kind out-of-scope` for prior sprints that touched
+   the same area. A sprint that repeats a documented mistake is a planning
+   failure, not bad luck. An out-of-scope hit is a previously rejected
+   concept — do not put it on the candidate list without naming the reject.
 3. **Propose candidates.** Pull from roadmap rows not yet shipped, plus open
    findings carried over from the last review. Present them as a plain numbered
    list first — this is a menu, not yet a decision.
@@ -59,7 +61,9 @@ see `rules/sage-conduct.mdc`.)
 9. **Update the roadmap** status column for each item taken into the sprint,
    linking to the spec. Amend, do not delete — mark superseded rows.
 10. **Render.** `sage notebook render <notebook>/sprints/NN-<slug>/spec.md`, then
-    `sage notebook index`.
+    `sage notebook index`. Advisory, non-blocking: `sage review doc` on that spec
+    (checklist `skills/sage-review/references/checklists/design-doc.md`).
+    Unavailable reviewer → one-line notice, do not block the gate.
 11. **Gate.** Decision brief on the assembled spec. Stop.
 
 ## The readiness contract
@@ -81,10 +85,8 @@ already run, whoever edits it MUST reset `readiness` to `requirements-only`.
 
 ## Conduct
 
-Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
-on a host without an always-applied rules mechanism (Claude Code), the
-operator must get its content into the session some other way (e.g. folded
-into the project's `CLAUDE.md`) before running this skill.
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically
+every session. sage-mode is Cursor-only.
 
 ## Non-interactive
 

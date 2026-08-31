@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLedger, next, saveLedger, type Ledger } from "../lib/board/index.js";
+import { parseLedger, next, saveLedger, type Ledger, skippedStepsWithoutReason, renderBoardMarkdown } from "../lib/board/index.js";
 import { renderLedger, ledgerPath } from "../lib/board/index.js";
 import { computeWtf, deriveWtfSignals, evaluateCircuitBreaker, type WtfSignals } from "../lib/board/index.js";
 import {
@@ -329,4 +329,29 @@ test("deriveWtfSignals: allRemainingFindingsLow is false, not true, when finding
   const l = ledgerFor("98-nofindings");
   const signals = deriveWtfSignals(l, root);
   assert.equal(signals.allRemainingFindingsLow, false);
+});
+
+test("skippedStepsWithoutReason fails a skipped entry with no reason", () => {
+  const l = L({
+    nodes: { n1: pending },
+    skippedSteps: [
+      { step: "2. Interrogate", status: "skipped", reason: "no human" },
+      { step: "3. Demand test", status: "skipped" },
+    ],
+  });
+  assert.deepEqual(skippedStepsWithoutReason(l), ["3. Demand test"]);
+});
+
+test("renderBoardMarkdown WTF total equals the sum of the five components", () => {
+  const root = mkdtempSync(join(tmpdir(), "sage-board-render-"));
+  const l = L({
+    sprint: "01",
+    nodes: { n1: pending, n2: pending, n3: pending },
+  });
+  saveLedger(l, root);
+  const md = renderBoardMarkdown("01", root);
+  const m = md.match(/WTF total \*\*(\d+)\*\*.*\(sum (\d+)\)/);
+  assert.ok(m, md);
+  assert.equal(m![1], m![2]);
+  assert.match(md, /Observed model receipts are unavailable/);
 });

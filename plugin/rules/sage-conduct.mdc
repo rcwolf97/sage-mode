@@ -69,6 +69,10 @@ If two readings of an instruction are both plausible, stop and ask; do not pick 
 
 During autonomous phases, make a ruling and log it. A wrong ruling costs rework a human can undo; a session parked on a question costs their whole day. Escalate to the user only for: destructive operations, security-sensitive decisions, effects outside the worktree, and plan defects that invalidate the spec.
 
+## skip: on procedure steps
+
+The first todos of a commanded skill are that skill's procedure steps, copied verbatim. A skipped step stays in the list as `skip: <reason>`. The ledger records it under Skipped steps (`status: skipped` plus `reason`). A skipped row with no reason fails `sage lint` (`skipped-reason`). Never delete the step to look faster.
+
 ## Claimed limitations need evidence
 
 "I can't do X" requires the error output.

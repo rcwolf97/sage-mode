@@ -14,7 +14,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test --test-reporter spec test/*.test.js lib/**/*.test.js",
-    "lint": "node lib/cli.js lint"
+    "lint": "node lib/cli.js lint",
+    "eval:tier3": "node evals/tier3/run.js",
+    "hooks:test": "bash hooks/tests/run.sh",
+    "build:check": "npm run build && git diff --exit-code -- '*.js'",
+    "verify": "npm run build:check && npm test && npm run lint && npm run hooks:test && npm run eval:tier3"
   },
   "devDependencies": {
     "@types/node": "^24.2.0",

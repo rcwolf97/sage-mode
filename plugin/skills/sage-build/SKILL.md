@@ -15,8 +15,7 @@ so name the flag you depend on rather than trust the default.
 
 **Refuse if the plan's spec is not `readiness: implementation-ready`.** Point
 the user at `/sage-dag` rather than building against an unvalidated graph.
-**Conduct:** assumes `rules/sage-conduct.mdc` is loaded; on Claude Code (no
-always-applied rules), get it into the session first via `CLAUDE.md`.
+**Conduct:** assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically. sage-mode is Cursor-only.
 
 **Reads:** `dag.json`, `ledger.md`.
 **Writes:** commits in worktrees, `ledger.md`, board files, node reports,

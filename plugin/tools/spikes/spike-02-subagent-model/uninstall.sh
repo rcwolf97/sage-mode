@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# uninstall.sh — removes exactly the two zz-spike02-*.md files install.sh
+# uninstall.sh — removes exactly the zz-spike02-*.md files install.sh
 # copied into the real agents/ directory. Safe to run even if install.sh
 # was never run (no-op).
 set -eu

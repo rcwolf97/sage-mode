@@ -13,6 +13,8 @@ import {
   validateFindingRow,
   classifyFinding,
   classifyFix,
+  applyCrossRunDedup,
+  looksLikeCommandOutput,
   type Finding,
 } from "../lib/review/index.js";
 
@@ -130,18 +132,71 @@ test("review dedup merges two findings at the same path:line:category even when 
   assert.equal(out[0]!.confidence, 9);
 });
 
-// Cross-run suppression ("a fingerprint the user previously marked `skipped`
-// is suppressed only if the file hasn't changed since" — skills/sage-review/
-// SKILL.md ~line 79) has NO corresponding implementation anywhere in this
-// module: `Finding` carries no `status`/`skipped` field, `dedup`/`gate` take
-// only a single run's findings array with no notion of a prior run or a
-// file-content check, and no other lib exports anything that consults
-// lib/evidence's git-tree-hash fingerprinting for this purpose either. The
-// rule is real (it's documented as a mechanical pipeline step) but is
-// currently enforced by nothing except an LLM reviewer choosing to follow
-// the prose — there is no code path to write a unit test against. See the
-// final summary for this flagged as a gap rather than fabricated here as a
-// test of scaffolding this file doesn't own.
+test("gate demotes rung >= 4 without command-output evidence to 3 and caps confidence at 5", () => {
+  const out = gate([
+    {
+      severity: "HIGH",
+      confidence: 9,
+      path: "src/a.ts",
+      category: "correctness",
+      summary: "fails at runtime",
+      evidence: "I ran it in my head",
+      specialist: "correctness",
+      rung: 4,
+    },
+  ]);
+  assert.equal(out[0]!.rung, 3);
+  assert.equal(out[0]!.confidence, 5);
+});
+
+test("gate keeps rung 4 when evidence looks like command output", () => {
+  const out = gate([
+    {
+      severity: "HIGH",
+      confidence: 8,
+      path: "src/a.ts",
+      category: "correctness",
+      summary: "fails at runtime",
+      evidence: "```\n$ npm test\nnot ok\n```",
+      specialist: "correctness",
+      rung: 4,
+    },
+  ]);
+  assert.equal(out[0]!.rung, 4);
+  assert.equal(out[0]!.confidence, 8);
+});
+
+test("looksLikeCommandOutput accepts fences and prompt markers", () => {
+  assert.equal(looksLikeCommandOutput("```\nok\n```"), true);
+  assert.equal(looksLikeCommandOutput("$ npm test"), true);
+  assert.equal(looksLikeCommandOutput("just a sentence"), false);
+});
+
+test("applyCrossRunDedup suppresses skipped fingerprints only when the file hash is unchanged; never suppresses fixed", () => {
+  const skipped: Finding = {
+    severity: "NITPICK",
+    confidence: 6,
+    path: "src/a.ts",
+    category: "style",
+    summary: "naming",
+    specialist: "maintainability",
+    fingerprint: "src/a.ts:style",
+  };
+  const state = {
+    "src/a.ts:style": { fingerprint: "src/a.ts:style", disposition: "skipped" as const, hash: "aaa" },
+    "src/b.ts:bug": { fingerprint: "src/b.ts:bug", disposition: "fixed" as const, hash: "bbb" },
+  };
+  const hashes: Record<string, string> = { "src/a.ts": "aaa", "src/b.ts": "bbb" };
+  const fileHash = (p: string) => hashes[p];
+  const dropped = applyCrossRunDedup([skipped], state, fileHash);
+  assert.equal(dropped.length, 0);
+  hashes["src/a.ts"] = "changed";
+  const kept = applyCrossRunDedup([skipped], state, fileHash);
+  assert.equal(kept.length, 1);
+  const fixed: Finding = { ...skipped, path: "src/b.ts", fingerprint: "src/b.ts:bug" };
+  const neverDrop = applyCrossRunDedup([fixed], state, fileHash);
+  assert.equal(neverDrop.length, 1);
+});
 
 test("checkRecommendation fails when the section exists but is empty", () => {
   const md = `## Residuals\n\nnone\n\n## Recommendation\n\n## Not-a-real-heading-but-lowercase-so-ignored\n`;

@@ -1,6 +1,7 @@
 ---
 name: zz-spike02-default-model
 description: SPIKE-02 probe agent — control case, no model field at all (uses whatever the host defaults a plugin-shipped subagent to). Never dispatch this outside the SPIKE-02 procedure in tools/spikes/spike-02-subagent-model/README.md.
+lane: A
 ---
 You are the SPIKE-02 "default-model" probe agent for sage-mode. Do not do
 any real work. Respond with EXACTLY this, filling in the blanks as best you

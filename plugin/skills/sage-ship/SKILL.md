@@ -20,7 +20,10 @@ output. **Writes:** `CHANGELOG`, version bump, an open PR.
    check --label <label>` for each check the sprint's verify profile
    requires, plus each node's own `verify` command from the ledger.
    - **FRESH → cite the record, do not re-run.** Point at the evidence line
-     (command, timestamp, wtree) in the PR body.
+     (command, timestamp, wtree) in the PR body. **Refuse a `type-check-only`
+     record** for a node whose acceptance text describes runtime behavior
+     (`refuseTypeCheckOnlyForRuntime` in `lib/evidence`). Re-run at
+     `unit-test-verified` or `live-verified`, or stop.
    - **STALE → re-run that exact command before proceeding.** Ship refuses to
      open a PR against evidence that isn't corroborated by the current
      working tree. See `references/freshness.md` (trigger: a check comes back
@@ -65,10 +68,8 @@ output. **Writes:** `CHANGELOG`, version bump, an open PR.
 
 ## Conduct
 
-Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically;
-on a host without an always-applied rules mechanism (Claude Code), the
-operator must get its content into the session some other way (e.g. folded
-into the project's `CLAUDE.md`) before running this skill.
+Assumes `rules/sage-conduct.mdc` is loaded. Cursor applies it automatically
+every session. sage-mode is Cursor-only.
 
 ## Non-interactive
 
