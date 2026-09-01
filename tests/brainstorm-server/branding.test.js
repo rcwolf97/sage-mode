@@ -9,7 +9,7 @@ const path = require('path');
 const assert = require('assert');
 
 const REPO_ROOT = path.join(__dirname, '../..');
-const SERVER_PATH = path.join(REPO_ROOT, 'skills/brainstorming/scripts/server.cjs');
+const SERVER_PATH = path.join(REPO_ROOT, 'plugins/sage-mode/skills/brainstorming/scripts/server.cjs');
 const PACKAGE_VERSION = JSON.parse(
   fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')
 ).version;
@@ -77,7 +77,7 @@ function writeFragment(dir) {
 function createPackagedServerFixture(version) {
   const root = fs.mkdtempSync(path.join('/tmp', 'sage-mode-packaged-server-'));
   const scriptDir = path.join(root, 'skills/brainstorming/scripts');
-  fs.cpSync(path.join(REPO_ROOT, 'skills/brainstorming/scripts'), scriptDir, { recursive: true });
+  fs.cpSync(path.join(REPO_ROOT, 'plugins/sage-mode/skills/brainstorming/scripts'), scriptDir, { recursive: true });
   fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(
     path.join(root, '.claude-plugin/plugin.json'),

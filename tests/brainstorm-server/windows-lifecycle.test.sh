@@ -20,9 +20,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${SAGE_MODE_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-START_SCRIPT="$REPO_ROOT/skills/brainstorming/scripts/start-server.sh"
-STOP_SCRIPT="$REPO_ROOT/skills/brainstorming/scripts/stop-server.sh"
-SERVER_SCRIPT="$REPO_ROOT/skills/brainstorming/scripts/server.cjs"
+START_SCRIPT="$REPO_ROOT/plugins/sage-mode/skills/brainstorming/scripts/start-server.sh"
+STOP_SCRIPT="$REPO_ROOT/plugins/sage-mode/skills/brainstorming/scripts/stop-server.sh"
+SERVER_SCRIPT="$REPO_ROOT/plugins/sage-mode/skills/brainstorming/scripts/server.cjs"
 
 TEST_DIR="${TMPDIR:-/tmp}/brainstorm-win-test-$$"
 
