@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Extract one task's full text from a ticket index (or legacy plan) into a
+# file the implementer reads in one call.
+#
+# Usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]
+# PLAN_FILE may be docs/tickets/<feature>/index.html. Sibling ticket HTML
+# is concatenated so Task N headings in those files still match.
+# Default OUTFILE: <repo-root>/.sage-mode/sdd/<plan-basename>/task-<N>-brief.md
+set -euo pipefail
+
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+  echo "usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]" >&2
+  exit 2
+fi
+
+plan=$1
+n=$2
+[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+
+if [ $# -eq 3 ]; then
+  out=$3
+else
+  dir=$("$(cd "$(dirname "$0")" && pwd)/sdd-workspace" "$plan")
+  out="$dir/task-${n}-brief.md"
+fi
+
+src=$plan
+tmp=""
+plan_dir=$(dirname "$plan")
+shopt -s nullglob
+siblings=( "$plan_dir"/*.html )
+shopt -u nullglob
+if [ ${#siblings[@]} -gt 1 ]; then
+  tmp=$(mktemp)
+  cat "$plan" > "$tmp"
+  for f in "${siblings[@]}"; do
+    [ "$f" -ef "$plan" ] && continue
+    cat "$f" >> "$tmp"
+  done
+  src=$tmp
+fi
+
+awk -v n="$n" '
+  /^```/ { infence = !infence }
+  !infence && ($0 ~ /^#+[ \t]+Task[ \t]+[0-9]+/ || $0 ~ /<h[1-6][^>]*>Task[ \t]+[0-9]+/) {
+    intask = ($0 ~ ("Task[ \t]+" n "([^0-9]|$)"))
+  }
+  intask { print }
+' "$src" > "$out"
+
+[ -n "$tmp" ] && rm -f "$tmp"
+
+if [ ! -s "$out" ]; then
+  echo "task ${n} not found in ${plan} (no heading matching 'Task ${n}')" >&2
+  exit 3
+fi
+
+echo "wrote ${out}: $(wc -l < "$out" | tr -d ' ') lines"

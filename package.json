@@ -1,0 +1,6 @@
+{
+  "name": "sage-mode",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sage Mode skills plugin for Cursor and Claude Code"
+}

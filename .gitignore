@@ -1,5 +1,17 @@
-node_modules/
-.DS_Store
-*.tsbuildinfo
-.sage/
 .worktrees/
+.private-journal/
+.claude/
+.sage-mode/
+.DS_Store
+node_modules/
+inspo
+triage/
+
+# Optional local clone of an eval harness; not part of the plugin.
+evals/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/

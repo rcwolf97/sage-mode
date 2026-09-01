@@ -1,1 +1,0 @@
-{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "[careful] Force-push to default branch (main) denied."}, "decision": "block", "reason": "[careful] Force-push to default branch (main) denied."}

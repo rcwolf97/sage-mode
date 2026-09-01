@@ -1,161 +1,34 @@
 <!doctype html>
 <html lang="en">
-<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>sage-mode · sage-mode</title>
-<link rel="stylesheet" href="assets/notebook.css">
-</head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sage Mode docs</title>
+<link rel="stylesheet" href="assets/sage-docs.css">
 <body>
-<div class="bar"><div class="bar-in">
-  <a class="brand" href="index.html">sage<span>·</span>mode</a>
-  <nav><a href="index.html" class="on">Home</a><a href="design/tech-spec.html">Design</a><a href="research/overview.html">Research</a></nav>
-</div></div>
-<div class="wrap">
-<main>
-  <div class="page-head">
-    <div class="eyebrow">Project notebook</div>
-    <h1>sage-mode</h1>
-    <div class="sub">A Cursor plugin for going from idea to shipped feature in a day — and a notebook that remembers how.</div>
-  </div>
-  <p class="lede">Five people built agent-engineering toolkits and all five converged on the same spine. None of them optimizes for shipping today, and none of them can find what it learned last week. <strong>sage-mode</strong> is the synthesis: a narrow spine that always runs, a searchable catalog that never costs you a token until it's needed, hooks that can actually veto the agent — and this notebook, which is both what you read and what the agents search.</p>
-
-<blockquote><p><strong>In plain terms:</strong> This page is the front door. Design holds the blueprint we're arguing about. Research holds the teardowns of the five repos it's built from. As the project runs, Plans, Reviews, Experiments and Learnings fill in below — every artifact sage-mode produces lands here as a page.</p></blockquote>
-
-<div class="sec-h">Design</div>
-<div class="cards">
-  <a class="card" href="design/competitive-analysis.html">
-    <div class="k">review · competitive, full access</div>
-    <div class="t">Competitive Analysis</div>
-    <div class="d">A second no-context agent, this time given all four repos and asked to name each comparator's best idea and check sage-mode against it directly in code. Verdict: gstack wins outright on semantic code memory, compound-engineering wins outright on verified cross-model review — sage-mode's own claimed differentiator — and a live regression was found and fixed in the one hook ported most literally from gstack.</div>
-  </a>
-  <a class="card" href="design/blind-comparison.html">
-    <div class="k">review · blind, code-only</div>
-    <div class="t">Blind Comparative Review</div>
-    <div class="d">One agent, zero design docs — just the plugin's actual code against the full gstack and superpowers repos, asked for an unbiased verdict. Ranked sage-mode-plugin last: real hooks, an excellent core skill, but 25 of 25 catalog skills turned out to be one template with the name swapped in, and the lint tool built to catch exactly that was disabled on it.</div>
-  </a>
-  <a class="card" href="design/adversarial-review.html">
-    <div class="k">review · v1, re-reviewed</div>
-    <div class="t">Adversarial Re-Review</div>
-    <div class="d">Ready with caveats. Independently re-verified the fix pass, found a new false negative in the same safety mechanism using glob shapes nobody had tried, and a CI gap — both closed same day — plus an honest five-repo comparison of the built system, not just the design.</div>
-  </a>
-  <a class="card" href="design/build-review.html">
-    <div class="k">review · v1</div>
-    <div class="t">Implementation Review</div>
-    <div class="d">The team's build against the spec: three blockers (hooks dead on Linux, unsafe lane check, empty skill bodies), eight major issues, and the parts that came out better than specified.</div>
-  </a>
-  <a class="card" href="design/tech-spec.html">
-    <div class="k">spec · build-ready</div>
-    <div class="t">Technical Specification v1.0</div>
-    <div class="d">Standalone. Everything a team needs to build sage-mode from an empty directory: data contracts, library APIs, hook logic, skill procedures, and 24 dependency-ordered work packages with acceptance criteria.</div>
-  </a>
-  <a class="card" href="design/architecture-v3.html">
-    <div class="k">v3 · rationale</div>
-    <div class="t">Architecture v3</div>
-    <div class="d">Eight commands you drive, an org of specialists underneath, three cost lanes that keep it runnable daily, and gstack's implementation machinery ported in.</div>
-  </a>
-  <a class="card" href="design/design-org.html">
-    <div class="k">design org</div>
-    <div class="t">The Design Org</div>
-    <div class="d">Six design commands, an agency of roles, and a twenty-item rubric for detecting the tells that make a page look AI-generated.</div>
-  </a>
-  <a class="card" href="research/scorecard.html">
-    <div class="k">scorecard</div>
-    <div class="t">sage-mode vs. the Five</div>
-    <div class="d">Twelve dimensions, six systems, scored — with maturity kept out of the total, because five of them exist and one is a document.</div>
-  </a>
-  <a class="card" href="research/cursor-capabilities.html">
-    <div class="k">research</div>
-    <div class="t">What Cursor Can Actually Do</div>
-    <div class="d">Plugins, skills, subagents with per-agent model selection, all 20 hook events, worktrees and parallelism — and the three limits that killed v1 ideas.</div>
-  </a>
-  <a class="card" href="research/gstack-coding-mechanics.html">
-    <div class="k">research</div>
-    <div class="t">gstack's Implementation Machinery</div>
-    <div class="d">Line-by-line: subagent dispatch, the finding schema, the verification gate, content-addressed test freshness, hook polarity, the QA circuit breaker.</div>
-  </a>
-  <a class="card" href="design/architecture-v2.html">
-    <div class="k">v2 · superseded</div>
-    <div class="t">Architecture v2</div>
-    <div class="d">Introduced the org chart and the sprint model. Replaced by v3, which drops the router and adds the cost architecture.</div>
-  </a>
-  <a class="card" href="design/architecture.html">
-    <div class="k">v0.1 · superseded</div>
-    <div class="t">Architecture v0.1</div>
-    <div class="d">The first pass: spine plus catalog, four blocking hooks, a time budget. Kept for the record.</div>
-  </a>
-  <div class="card ghost">
-    <div class="k">next</div>
-    <div class="t">DAG Schema</div>
-    <div class="d"><code>dag.json</code> — node ownership lanes, dependencies, verify commands, worktree allocation.</div>
-  </div>
-</div>
-
-<div class="sec-h">Research — the five repos</div>
-<div class="cards">
-  <a class="card" href="research/overview.html">
-    <div class="k">start here</div>
-    <div class="t">Five Repos, Compared</div>
-    <div class="d">What each fundamentally believes, the eight things they all agree on, the seven axes where they genuinely conflict, and the six problems none of them solve.</div>
-  </a>
-  <a class="card" href="research/superpowers.html">
-    <div class="k">obra · 14 skills</div>
-    <div class="t">superpowers</div>
-    <div class="d">"The model will talk itself out of the process." Iron Laws, rationalization tables built from observed failures, one hook that carries the whole system.</div>
-  </a>
-  <a class="card" href="research/gstack.html">
-    <div class="k">garrytan · 53 units</div>
-    <div class="t">gstack</div>
-    <div class="d">"AI made completeness cheap." A simulated org — CEO, eng manager, designer, CSO — plus the only hooks in the set that actually block.</div>
-  </a>
-  <a class="card" href="research/compound-engineering-plugin.html">
-    <div class="k">every inc · 33 skills</div>
-    <div class="t">Compound Engineering</div>
-    <div class="d">"Each unit of work should make the next one cheaper." Learnings as literal file I/O — the right instinct, filed in a folder nobody can search.</div>
-  </a>
-  <a class="card" href="research/agent-skills.html">
-    <div class="k">addyosmani · 24 skills</div>
-    <div class="t">agent-skills</div>
-    <div class="d">"The industry already solved this." Google's engineering practice transcribed into prompts, with the widest lifecycle coverage of the five.</div>
-  </a>
-  <a class="card" href="research/ui-ux-pro-max-skill.html">
-    <div class="k">nextlevelbuilder · 22 CSVs</div>
-    <div class="t">UI/UX Pro Max</div>
-    <div class="d">"The model has no taste and no eyes." A BM25 search engine over curated design data — the only knowledge base here that doesn't grow its context cost.</div>
-  </a>
-</div>
-
-<div class="sec-h">Not yet written</div>
-<div class="cards">
-  <div class="card ghost"><div class="k">specs</div><div class="t">Specs</div><div class="d">Product contracts produced by <code>sage-shape</code>, one per feature.</div></div>
-  <div class="card ghost"><div class="k">plans</div><div class="t">Plans</div><div class="d">DAG decompositions from <code>sage-plan</code>, with node ownership and verify commands.</div></div>
-  <div class="card ghost"><div class="k">reviews</div><div class="t">Reviews</div><div class="d">Adversarial findings and runtime evidence — screenshots, logs, eval output.</div></div>
-  <div class="card ghost"><div class="k">experiments</div><div class="t">Experiments</div><div class="d">What was tried, what it showed, and whether it was kept.</div></div>
-  <div class="card ghost"><div class="k">learnings</div><div class="t">Learnings</div><div class="d">One durable lesson per run, categorized, deduped against the index.</div></div>
-  <div class="card ghost"><div class="k">preferences</div><div class="t">Preferences</div><div class="d">Your standing decisions — stack, style, defaults, vetoes. Required reading for shape and plan.</div></div>
-</div>
-
-  <div class="foot">sage-mode notebook · rendered 2026-08-25</div>
-</main>
-
-</div>
-<script src="assets/mermaid.min.js"></script>
-<script>
-(function(){
-  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  try {
-    mermaid.initialize({
-      startOnLoad:true,
-      theme: dark ? 'dark' : 'neutral',
-      themeVariables: dark
-        ? { background:'#1c1a17', primaryColor:'#232019', primaryTextColor:'#f0ece5',
-             primaryBorderColor:'#7a5537', lineColor:'#8a8275', fontSize:'14px' }
-        : { background:'#ffffff', primaryColor:'#f4f2ee', primaryTextColor:'#1c1a17',
-             primaryBorderColor:'#d8a583', lineColor:'#847c70', fontSize:'14px' },
-      flowchart:{ curve:'basis', htmlLabels:true }
-    });
-  } catch(e) {}
-})();
-</script>
+<nav><a href="index.html">Sage Mode</a></nav>
+<h1>Sage Mode</h1>
+<p class="lede">Opt-in commands. Unslop is always on. Open a page, read the first screen, stop if that is enough.</p>
+<h2>Start</h2>
+<ul>
+  <li><a href="../README.md">Install</a></li>
+  <li>Type a slash command. Nothing else auto-runs except unslop.</li>
+  <li><code>/pressure-test</code> before you design a product. <code>/brainstorming</code> writes the spec. <code>/multi-phase-plan</code> sequences it. <code>/writing-plans</code> tickets the current phase.</li>
+</ul>
+<h2>Pressure-tests</h2>
+<ul></ul>
+<h2>Learnings</h2>
+<p class="muted">None yet. <code>/ce-compound</code> writes one page per solved problem and links it here.</p>
+<ul></ul>
+<h2>Specs</h2>
+<ul></ul>
+<h2>Plans</h2>
+<ul></ul>
+<h2>Tickets</h2>
+<ul></ul>
+<h2>Plugin</h2>
+<ul>
+  <li><a href="testing.html">Tests</a></li>
+  <li><a href="hooks.html">Hooks</a></li>
+</ul>
 </body>
 </html>

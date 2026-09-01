@@ -1,1 +1,0 @@
-{"severity":"CRITICAL","confidence":9,"path":"evals/fixtures/planted-auth.ts","line":3,"category":"security","summary":"Rate limit key is derived from a header the client controls.","evidence":"return req.headers[\"x-api-key\"] ?? req.ip","specialist":"security"}

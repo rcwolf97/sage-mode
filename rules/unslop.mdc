@@ -1,0 +1,28 @@
+---
+description: Unslop every reply. Specs and docs are short HTML off docs/index.html.
+alwaysApply: true
+---
+
+# Before any message or doc to the human
+
+Apply `skills/unslop/SKILL.md`. This is not optional and does not wait for `/unslop`.
+
+Hard stops:
+- No em dashes.
+- No chatbot closers. Cut "I hope this helps", "Great question", "Let me know if".
+- Lead with the answer. One idea per sentence.
+- A one-page summary beats a ten-page report. If they need the rest, put it in `<details>` or a linked page.
+
+# Specs, plans, learnings
+
+Write HTML a person can open in a browser. Hub: `docs/index.html`.
+
+When you create a spec, plan, or learning:
+1. One HTML file. Learnings: `docs/learnings/<slug>.html`. Specs: `docs/specs/<date>-<topic>.html`. Tickets: `docs/tickets/<feature>/<NN>-<slug>.html`. Pressure-tests: `docs/pressure-tests/<date>-<slug>.html`.
+2. The first screen is the whole point: what it is, what to do, what would be wrong.
+3. Extra material goes in `<details>` or another page. Do not lead with background.
+4. Add a link on `docs/index.html`.
+5. Unslop the page before you stop.
+6. Copy `docs/assets/sage-docs.css` into the target repo if it is missing. If that repo has no hub, copy `docs/assets/hub.stub.html` to `docs/index.html`.
+
+Other sage-mode skills stay opt-in. Unslop does not.

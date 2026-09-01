@@ -1,7 +1,0 @@
-{
-  "name": "sage-probe",
-  "description": "SPIKE-02 probe: does a plugin-shipped subagent honor model frontmatter?",
-  "version": "0.0.1",
-  "author": { "name": "rcwolf97" },
-  "agents": "./agents"
-}

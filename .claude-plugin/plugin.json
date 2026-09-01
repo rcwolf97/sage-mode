@@ -1,0 +1,22 @@
+{
+  "name": "sage-mode",
+  "description": "Opt-in skills for Cursor and Claude. Unslop always on. Specs are short HTML.",
+  "version": "1.0.0",
+  "author": {
+    "name": "rcwolf97"
+  },
+  "homepage": "https://github.com/rcwolf97/sage-mode",
+  "repository": "https://github.com/rcwolf97/sage-mode",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "tdd",
+    "debugging",
+    "collaboration",
+    "workflows"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "rules": "./rules/",
+  "agents": "./agents/"
+}
