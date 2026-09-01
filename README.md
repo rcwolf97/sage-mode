@@ -1,62 +1,80 @@
-# sage-mode
+# Sage Mode
 
-A Cursor marketplace that ships **Sage Mode**: an engineering organization you command. Eight sprint commands, six design commands, specialist agents, adversarial review, and a notebook that remembers.
+Opt-in skills for Cursor and Claude Code. Unslop is always on. Everything else waits for a slash command.
 
-This repository is a **custom Cursor marketplace**, not an official `cursor.com/marketplace` listing.
+This is a fork of [obra/superpowers](https://github.com/obra/superpowers), trimmed to Cursor + Claude, plus compounding, teach, unslop, pressure-test, multi-phase-plan, and Pocock checklists.
 
-## Install in Cursor
+**Read the docs in a browser:** open [`docs/index.html`](docs/index.html). First screen is the point.
 
-Do **not** use `/add-plugin <github-url>` (that flow pins a stale commit).
+## Install
 
-### Custom marketplace
+### Cursor
 
 1. Open **Customize → Plugins**.
-2. Add a marketplace with this repo: `https://github.com/rcwolf97/sage-mode`
-3. Install **sage-mode** at user or project scope.
+2. Add a marketplace: `https://github.com/rcwolf97/sage-mode`
+3. Install **sage-mode**.
 4. **Developer: Reload Window**.
-5. In a project, run `/sage-setup`.
 
-### Local development symlink
+Local checkout:
 
 ```bash
-ln -s "$(pwd)/plugin" ~/.cursor/plugins/local/sage-mode
+ln -s "$(pwd)" ~/.cursor/plugins/local/sage-mode
 ```
 
-Then **Developer: Reload Window**. Enable *Include third-party Plugins, Skills, and other configs* if the plugin does not appear. Put `~/.sage/bin` on your `PATH`.
+### Claude Code
 
-## Prerequisites
-
-| Requirement | Version | If missing |
-|---|---|---|
-| Cursor | ≥ 3.14 | Hard requirement |
-| Node.js | ≥ 20 | CLI, notebook, evidence, recall unavailable |
-| git | ≥ 2.38 | Hard requirement |
-| GitHub CLI `gh` | ≥ 2.0 (optional) | `/sage-ship` prints the PR body instead of opening it |
+```bash
+/plugin marketplace add rcwolf97/sage-mode
+/plugin install sage-mode@sage-mode
+```
 
 ## Commands
 
-Sprint: `/sage-shape` `/sage-plan` `/sage-dag` `/sage-build` `/sage-review` `/sage-verify` `/sage-ship` `/sage-retro`
+Type the slash command. Skills do not auto-trigger except unslop, which is a rule.
 
-Support: `/sage-setup` `/sage-status` `/sage-unsafe`
+**Business**
+`/pressure-test`
 
-Design: `/design-intake` `/design-direction` `/design-system` `/design-motion` `/design-build` `/design-critique`
+**Workflow**
+`/brainstorming` `/multi-phase-plan` `/writing-plans` `/executing-plans` `/subagent-driven-development` `/test-driven-development` `/systematic-debugging` `/verification-before-completion` `/code-review` `/receiving-code-review` `/using-git-worktrees` `/finishing-a-development-branch` `/dispatching-parallel-agents` `/writing-skills` `/writing-for-agents`
 
-## Fifteen-minute first run
+`/brainstorming` writes the spec. `/multi-phase-plan` sequences it into stacked features. `/writing-plans` publishes tickets for the current phase. `/code-review` dispatches a gemini-3.7-flash reviewer. `/requesting-code-review` is the same command.
 
-1. Install the plugin (above).
-2. Open an empty git repo.
-3. `/sage-setup`
-4. `/sage-shape` — answer one question at a time until a roadmap exists.
-5. Open `docs/roadmap.html` and `docs/index.html`.
+**Explain**
+`/teach`
+
+**Compounding**
+`/ce-compound`
+
+**Checklists**
+`/diagnosing-bugs` `/wayfinder` `/triage`
+
+`/unslop` cleans an existing file. You do not need it for new replies.
+
+`/using-sage-mode` lists the same catalog if you forget.
 
 ## Layout
 
 ```
-.cursor-plugin/marketplace.json   # this repo is the marketplace
-plugin/                           # the installable Cursor plugin
-docs/                             # research notebook (this repo)
+.cursor-plugin/     Cursor plugin + marketplace
+.claude-plugin/     Claude Code plugin + marketplace
+commands/           slash commands
+skills/             skill bodies
+agents/             code-reviewer (gemini-3.7-flash)
+rules/              unslop, always on
+docs/index.html     hub
+hooks/              present but empty
 ```
+
+## Tests
+
+```bash
+bash tests/hooks/test-session-start.sh
+bash tests/shell-lint/test-lint-shell.sh
+```
+
+See [docs/testing.html](docs/testing.html).
 
 ## License
 
-MIT
+MIT. See LICENSE. Upstream copyright remains with Jesse Vincent. `/ce-compound` is from Compound Engineering. `/teach` and `/unslop` are from pstack. `/multi-phase-plan` is adapted from pstack's multi-phase playbook. `/pressure-test` draws from gstack office-hours and Pocock grilling. Tickets from Pocock to-tickets. `/writing-for-agents` from Pocock. Checklists from Matt Pocock. This fork: [rcwolf97/sage-mode](https://github.com/rcwolf97/sage-mode).

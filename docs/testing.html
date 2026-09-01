@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tests</title>
+<link rel="stylesheet" href="assets/sage-docs.css">
+<body>
+<nav><a href="index.html">Sage Mode</a> / Tests</nav>
+<h1>Tests</h1>
+<p class="lede">Run the opt-in check. Everything else is optional.</p>
+<pre>bash tests/hooks/test-session-start.sh
+bash tests/shell-lint/test-lint-shell.sh</pre>
+<table>
+  <thead><tr><th>Where</th><th>What</th></tr></thead>
+  <tbody>
+    <tr><td><code>tests/hooks/</code></td><td>No SessionStart. Skills opt-in except unslop.</td></tr>
+    <tr><td><code>tests/shell-lint/</code></td><td>Shell lint on scripts</td></tr>
+    <tr><td><code>tests/claude-code/</code></td><td>Live Claude, skip unless you have it</td></tr>
+  </tbody>
+</table>
+</body>
+</html>

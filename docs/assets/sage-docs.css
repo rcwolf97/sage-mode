@@ -1,0 +1,53 @@
+/* Sage Mode docs. Built to be read, not presented. */
+:root {
+  --ink: #1c1916;
+  --muted: #5c564e;
+  --paper: #f6f1e8;
+  --rule: #d9d0c3;
+  --link: #0b3d8c;
+}
+* { box-sizing: border-box; }
+html { font-size: 19px; }
+body {
+  margin: 0 auto;
+  max-width: 38rem;
+  padding: 1.5rem 1.25rem 4rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  line-height: 1.45;
+}
+nav {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+h1, h2, h3 {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 650;
+  line-height: 1.2;
+  text-wrap: pretty;
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.75rem; }
+h2 { font-size: 1.1rem; margin: 1.75rem 0 0.5rem; }
+p, li { text-wrap: pretty; }
+a { color: var(--link); }
+.lede { font-size: 1.05rem; }
+.muted { color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 1.5rem 0; }
+details {
+  border-top: 1px solid var(--rule);
+  padding: 0.6rem 0;
+}
+summary { cursor: pointer; font-family: ui-sans-serif, system-ui, sans-serif; }
+code, pre {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.85rem;
+}
+pre {
+  background: #efe8dc;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+}
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; border-bottom: 1px solid var(--rule); padding: 0.35rem 0.5rem 0.35rem 0; }

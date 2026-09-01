@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hooks</title>
+<link rel="stylesheet" href="assets/sage-docs.css">
+<body>
+<nav><a href="index.html">Sage Mode</a> / Hooks</nav>
+<h1>Hooks</h1>
+<p class="lede"><code>hooks.json</code> is empty. Sage Mode does not inject a skill at session start. Unslop is a rule, not a SessionStart hook.</p>
+<p><code>hooks/run-hook.cmd</code> is still there if you add a hook later. Scripts must be extensionless so Windows does not prepend bash.</p>
+<details>
+  <summary>If you add a hook</summary>
+  <p>Register it in <code>hooks.json</code> and <code>hooks-cursor.json</code>. Point at <code>run-hook.cmd</code> plus an extensionless script. Quote the plugin root. Set <code>"shell": "bash"</code>. Do not restore SessionStart skill injection. Trust <code>hooks/run-hook.cmd</code> over any writeup.</p>
+</details>
+</body>
+</html>
