@@ -17,7 +17,6 @@
     "workflows"
   ],
   "skills": "./skills/",
-  "commands": "./commands/",
   "rules": "./rules/",
   "agents": "./agents/"
 }
