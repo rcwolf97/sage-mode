@@ -10,7 +10,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const HELPER = path.join(__dirname, '../../skills/brainstorming/scripts/helper.js');
+const HELPER = path.join(__dirname, '../../plugins/sage-mode/skills/brainstorming/scripts/helper.js');
 
 const src = fs.readFileSync(HELPER, 'utf-8');
 

@@ -10,7 +10,7 @@
       "name": "sage-mode",
       "description": "Opt-in skills. Unslop always on. Specs are short HTML.",
       "version": "1.0.0",
-      "source": "./",
+      "source": "./plugins/sage-mode",
       "author": {
         "name": "rcwolf97"
       }

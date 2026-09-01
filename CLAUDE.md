@@ -1,10 +1,10 @@
 # Sage Mode — contributor notes
 
-This repo is a Cursor + Claude Code plugin. Skills live in `skills/`. Slash commands in `commands/` are the entry point for every skill except unslop.
+This repo is a Cursor + Claude Code plugin. The installable plugin is `plugins/sage-mode/`. Skills live in `plugins/sage-mode/skills/`. Slash commands in `plugins/sage-mode/commands/` are the entry point for every skill except unslop.
 
-Unslop is always on: `rules/unslop.mdc` (`alwaysApply: true`) plus `skills/unslop/SKILL.md` with no `disable-model-invocation`. Do not add that flag to unslop. Do not restore SessionStart injection. Do not add harness support. Do not remove `disable-model-invocation: true` from any other skill.
+Unslop is always on: `plugins/sage-mode/rules/unslop.mdc` (`alwaysApply: true`) plus `plugins/sage-mode/skills/unslop/SKILL.md` with no `disable-model-invocation`. Do not add that flag to unslop. Do not restore SessionStart injection. Do not add harness support. Do not remove `disable-model-invocation: true` from any other skill.
 
-`/requesting-code-review` is an alias. The skill is `skills/code-review/`. Do not recreate `skills/requesting-code-review/`.
+`/requesting-code-review` is an alias. The skill is `plugins/sage-mode/skills/code-review/`. Do not recreate `skills/requesting-code-review/`.
 
 Docs for humans are HTML off `docs/index.html`. First screen is the point. Extra goes in `<details>`. `/multi-phase-plan` writes `docs/plans/<slug>/`. `/writing-plans` writes tickets under `docs/tickets/` for the current phase, not a plan essay.
 

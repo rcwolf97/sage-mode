@@ -7,8 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-USING_SKILL="$REPO_ROOT/skills/using-git-worktrees/SKILL.md"
-FINISHING_SKILL="$REPO_ROOT/skills/finishing-a-development-branch/SKILL.md"
+USING_SKILL="$REPO_ROOT/plugins/sage-mode/skills/using-git-worktrees/SKILL.md"
+FINISHING_SKILL="$REPO_ROOT/plugins/sage-mode/skills/finishing-a-development-branch/SKILL.md"
 ROTOTILL_SPEC="$REPO_ROOT/docs/specs/2026-04-06-worktree-rototill.html"
 ROTOTILL_PLAN="$REPO_ROOT/docs/plans/2026-04-06-worktree-rototill.html"
 

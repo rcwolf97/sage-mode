@@ -15,10 +15,10 @@ This is a fork of [obra/superpowers](https://github.com/obra/superpowers), trimm
 3. Install **sage-mode**.
 4. **Developer: Reload Window**.
 
-Local checkout:
+Local checkout (plugin directory, not the repo root):
 
 ```bash
-ln -s "$(pwd)" ~/.cursor/plugins/local/sage-mode
+ln -s "$(pwd)/plugins/sage-mode" ~/.cursor/plugins/local/sage-mode
 ```
 
 ### Claude Code
@@ -56,14 +56,17 @@ Type the slash command. Skills do not auto-trigger except unslop, which is a rul
 ## Layout
 
 ```
-.cursor-plugin/     Cursor plugin + marketplace
-.claude-plugin/     Claude Code plugin + marketplace
-commands/           slash commands
-skills/             skill bodies
-agents/             code-reviewer (gemini-3.7-flash)
-rules/              unslop, always on
-docs/index.html     hub
-hooks/              present but empty
+.cursor-plugin/marketplace.json   Cursor marketplace (pluginRoot: plugins)
+.claude-plugin/marketplace.json   Claude Code marketplace
+plugins/sage-mode/                plugin body
+  .cursor-plugin/plugin.json
+  .claude-plugin/plugin.json
+  commands/                       slash commands
+  skills/                         skill bodies
+  agents/                         code-reviewer (gemini-3.7-flash)
+  rules/                          unslop, always on
+  hooks/                          present but empty
+docs/index.html                   hub
 ```
 
 ## Tests

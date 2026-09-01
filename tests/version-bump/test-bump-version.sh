@@ -54,7 +54,7 @@ make_fixture "$happy_repo" $'name: sage-mode\nversion: 1.2.3'
 
 jq -e '
   any(.files[];
-    .path == ".claude-plugin/plugin.json" and .field == "version")
+    .path == "plugins/sage-mode/.claude-plugin/plugin.json" and .field == "version")
 ' "$REPO_ROOT/.version-bump.json" >/dev/null \
   || fail "Claude plugin manifest is not registered"
 
