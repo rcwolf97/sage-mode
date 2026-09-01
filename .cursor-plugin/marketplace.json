@@ -6,13 +6,12 @@
   },
   "metadata": {
     "description": "Opt-in skills. Unslop always on. Specs are short HTML.",
-    "version": "1.0.0",
-    "pluginRoot": "plugins"
+    "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "sage-mode",
-      "source": "sage-mode",
+      "source": "plugins/sage-mode",
       "description": "Opt-in skills. Unslop always on. Specs are short HTML.",
       "version": "1.0.0",
       "author": {

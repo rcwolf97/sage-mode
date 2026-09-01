@@ -66,8 +66,7 @@ fi
 
 if node -e '
 const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-if (m.metadata.pluginRoot !== "plugins") process.exit(1);
-if (m.plugins[0].source !== "sage-mode") process.exit(1);
+if (m.plugins[0].source !== "plugins/sage-mode") process.exit(1);
 ' "$REPO_ROOT/.cursor-plugin/marketplace.json"; then
   pass "cursor marketplace.json indexes plugins/sage-mode"
 else
