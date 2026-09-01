@@ -1,6 +1,6 @@
 # Sage Mode — contributor notes
 
-This repo is a Cursor + Claude Code plugin. The installable plugin is `plugins/sage-mode/`. Skills live in `plugins/sage-mode/skills/`. Claude Code slash entry is `plugins/sage-mode/commands/`. Cursor slash entry is the skills themselves (`disable-model-invocation: true`). Do not register `commands/` in `.cursor-plugin/plugin.json` or Cursor lists every command twice.
+This repo is a Cursor + Claude Code plugin. The installable plugin is `plugins/sage-mode/`. Skills live in `plugins/sage-mode/skills/`. Claude Code slash files are `plugins/sage-mode/claude-commands/` (not `commands/`). Cursor slash entry is the skills themselves (`disable-model-invocation: true`). Do not put a `commands/` directory in the plugin root: Cursor auto-discovers that folder even if `.cursor-plugin/plugin.json` omits `commands`.
 
 Unslop is always on: `plugins/sage-mode/rules/unslop.mdc` (`alwaysApply: true`) plus `plugins/sage-mode/skills/unslop/SKILL.md` with no `disable-model-invocation`. Do not add that flag to unslop. Do not restore SessionStart injection. Do not add harness support. Do not remove `disable-model-invocation: true` from any other skill.
 
