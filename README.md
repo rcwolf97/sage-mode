@@ -61,7 +61,7 @@ Type the slash command. Skills do not auto-trigger except unslop, which is a rul
 plugins/sage-mode/                plugin body
   .cursor-plugin/plugin.json
   .claude-plugin/plugin.json
-  commands/                       Claude Code slash commands (not registered in Cursor)
+  claude-commands/                Claude Code slash files (not commands/, so Cursor will not list them)
   skills/                         skill bodies; Cursor slash via disable-model-invocation
   agents/                         code-reviewer (gemini-3.7-flash)
   rules/                          unslop, always on

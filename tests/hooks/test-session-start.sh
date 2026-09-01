@@ -57,7 +57,7 @@ fi
 
 if node -e '
 const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-if (p.commands !== "./commands/") process.exit(1);
+if (p.commands !== "./claude-commands/") process.exit(1);
 ' "$PLUGIN_ROOT/.claude-plugin/plugin.json"; then
   pass "claude plugin.json still registers commands"
 else
@@ -73,10 +73,16 @@ else
   fail "cursor marketplace.json indexes plugins/sage-mode"
 fi
 
+if [[ -d "$PLUGIN_ROOT/commands" ]]; then
+  fail "no Cursor default commands/ directory"
+else
+  pass "no Cursor default commands/ directory"
+fi
+
 missing=0
 while IFS= read -r skill; do
   name=$(basename "$skill")
-  if [[ ! -f "$PLUGIN_ROOT/commands/${name}.md" ]]; then
+  if [[ ! -f "$PLUGIN_ROOT/claude-commands/${name}.md" ]]; then
     echo "    missing command for $name"
     missing=$((missing + 1))
   fi

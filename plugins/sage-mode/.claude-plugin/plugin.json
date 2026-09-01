@@ -16,7 +16,7 @@
     "workflows"
   ],
   "skills": "./skills/",
-  "commands": "./commands/",
+  "commands": "./claude-commands/",
   "rules": "./rules/",
   "agents": "./agents/"
 }
