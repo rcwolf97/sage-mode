@@ -30,7 +30,7 @@ ln -s "$(pwd)/plugins/sage-mode" ~/.cursor/plugins/local/sage-mode
 
 ## Commands
 
-Type the slash command. Skills do not auto-trigger except unslop, which is a rule.
+Type the slash command. Skills do not auto-trigger except unslop, which is a rule. On Cursor, `/requesting-code-review` is not listed; use `/code-review`.
 
 **Business**
 `/pressure-test`
@@ -61,8 +61,8 @@ Type the slash command. Skills do not auto-trigger except unslop, which is a rul
 plugins/sage-mode/                plugin body
   .cursor-plugin/plugin.json
   .claude-plugin/plugin.json
-  commands/                       slash commands
-  skills/                         skill bodies
+  commands/                       Claude Code slash commands (not registered in Cursor)
+  skills/                         skill bodies; Cursor slash via disable-model-invocation
   agents/                         code-reviewer (gemini-3.7-flash)
   rules/                          unslop, always on
   hooks/                          present but empty

@@ -46,12 +46,22 @@ fi
 if node -e '
 const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 if (p.hooks) { console.error("cursor plugin.json still has hooks"); process.exit(1); }
-if (p.commands !== "./commands/") { console.error("missing commands"); process.exit(1); }
+if (p.commands) { console.error("cursor plugin.json must not register commands"); process.exit(1); }
+if (p.skills !== "./skills/") { console.error("missing skills"); process.exit(1); }
 if (p.rules !== "./rules/") { console.error("missing rules"); process.exit(1); }
 ' "$PLUGIN_ROOT/.cursor-plugin/plugin.json"; then
-  pass "cursor plugin.json has commands, rules, no hooks"
+  pass "cursor plugin.json has skills, rules, no commands or hooks"
 else
-  fail "cursor plugin.json has commands, rules, no hooks"
+  fail "cursor plugin.json has skills, rules, no commands or hooks"
+fi
+
+if node -e '
+const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (p.commands !== "./commands/") process.exit(1);
+' "$PLUGIN_ROOT/.claude-plugin/plugin.json"; then
+  pass "claude plugin.json still registers commands"
+else
+  fail "claude plugin.json still registers commands"
 fi
 
 if node -e '
